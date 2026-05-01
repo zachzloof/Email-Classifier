@@ -14,7 +14,7 @@
       <h2>Result</h2>
       <p><strong>Category:</strong> {{ result.category }}</p>
       <p><strong>Priority:</strong> {{ result.priority }}</p>
-      <p><strong>Reason:</strong> {{ result.summary }}</p>
+      <p><strong>summary:</strong> {{ result.summary }}</p>
       <p><strong>Suggested Action:</strong> {{ result.suggested_action }}</p>
     </div>
 

@@ -3,6 +3,7 @@
     <nav class="nav">
       <router-link to="/">Classifier</router-link>
       <router-link to="/inbox">Inbox</router-link>
+      <router-link to="/reset">Reset</router-link>
     </nav>
 
     <router-view />

@@ -108,6 +108,15 @@ app.get("/emails", async (req, res) => {
   res.json(emails);
 });
 
+app.post("/reset", async (req, res) => {
+  try {
+    await db.exec(`DELETE FROM emails`);
+    res.json({ message: "Database cleared" });
+  } catch (err) {
+    res.status(500).json({ error: "Failed to reset DB" });
+  }
+});
+
 app.listen(3001, () => {
   console.log("Server running on http://localhost:3001");
 });

@@ -17,7 +17,7 @@
         <span class="badge priority">{{ email.priority }}</span>
       </div>
 
-      <p class="summary">{{ email.reason }}</p>
+      <p class="summary">{{ email.summary }}</p>
 
       <p class="action">
         👉 {{ email.suggested_action }}
