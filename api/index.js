@@ -28,6 +28,13 @@ await db.exec(`
   )
 `);
 
+await db.exec(`
+  CREATE TABLE IF NOT EXISTS deleted_graph_ids (
+    graph_id TEXT PRIMARY KEY,
+    deleted_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  )
+`);
+
 // Add graph_id to existing DBs that predate this column
 try { await db.exec("ALTER TABLE emails ADD COLUMN graph_id TEXT"); } catch (_) {}
 
@@ -164,10 +171,15 @@ app.post("/sync", async (req, res) => {
       { Prefer: 'outlook.body-content-type="text"' }
     );
 
+    // Expire tombstones older than 4 weeks (matches the sync window)
+    await db.run(`DELETE FROM deleted_graph_ids WHERE deleted_at < datetime('now', '-28 days')`);
+
     let added = 0;
     for (const msg of data.value) {
       const existing = await db.get("SELECT id FROM emails WHERE graph_id = ?", [msg.id]);
       if (existing) continue;
+      const tombstoned = await db.get("SELECT 1 FROM deleted_graph_ids WHERE graph_id = ?", [msg.id]);
+      if (tombstoned) continue;
 
       const bodyText =
         msg.body?.contentType === "html"
@@ -278,6 +290,56 @@ app.post("/classify", async (req, res) => {
 app.get("/emails", async (req, res) => {
   const emails = await db.all("SELECT * FROM emails ORDER BY created_at DESC");
   res.json(emails);
+});
+
+app.delete("/emails/:id", async (req, res) => {
+  try {
+    const email = await db.get("SELECT graph_id FROM emails WHERE id = ?", [req.params.id]);
+    if (!email) return res.status(404).json({ error: "Email not found" });
+
+    if (email.graph_id) {
+      try {
+        await graphFetch("POST", `/me/messages/${email.graph_id}/move`, { destinationId: "deleteditems" });
+      } catch (e) {
+        console.warn("Outlook move-to-trash failed (still deleting locally):", e.message);
+      }
+      await db.run("INSERT OR IGNORE INTO deleted_graph_ids (graph_id) VALUES (?)", [email.graph_id]);
+    }
+
+    await db.run("DELETE FROM emails WHERE id = ?", [req.params.id]);
+    res.json({ success: true });
+  } catch (err) {
+    if (err.status === 401) return res.status(401).json({ error: "Not authenticated" });
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post("/emails/bulk-delete", async (req, res) => {
+  const { ids } = req.body;
+  if (!Array.isArray(ids) || ids.length === 0) {
+    return res.status(400).json({ error: "ids must be a non-empty array" });
+  }
+  try {
+    const placeholders = ids.map(() => "?").join(",");
+    const rows = await db.all(`SELECT id, graph_id FROM emails WHERE id IN (${placeholders})`, ids);
+
+    for (const row of rows) {
+      if (row.graph_id) {
+        try {
+          await graphFetch("POST", `/me/messages/${row.graph_id}/move`, { destinationId: "deleteditems" });
+        } catch (e) {
+          console.warn(`Outlook move-to-trash failed for ${row.graph_id}:`, e.message);
+        }
+        await db.run("INSERT OR IGNORE INTO deleted_graph_ids (graph_id) VALUES (?)", [row.graph_id]);
+      }
+    }
+
+    await db.run(`DELETE FROM emails WHERE id IN (${placeholders})`, ids);
+    res.json({ success: true, deleted: rows.length });
+  } catch (err) {
+    if (err.status === 401) return res.status(401).json({ error: "Not authenticated" });
+    res.status(500).json({ error: err.message });
+  }
 });
 
 app.post("/reset", async (req, res) => {
