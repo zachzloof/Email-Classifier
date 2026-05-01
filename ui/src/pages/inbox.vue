@@ -1,106 +1,145 @@
 <template>
-  <div class="container">
-    <h1>Inbox 📥</h1>
-    <p class="subtitle">AI-classified stored emails</p>
+  <div class="min-h-[calc(100vh-64px)] px-4 py-10">
+    <div class="max-w-2xl mx-auto">
 
-    <div v-if="loading">Loading emails...</div>
-
-    <div v-if="emails.length === 0 && !loading">
-      No emails found.
-    </div>
-
-    <div
-      v-for="email in emails"
-      :key="email.id"
-      class="card"
-      @click="openEmail(email)"
-    >
-      <h3>{{ email.subject }}</h3>
-      <div class="meta">
-        <span class="badge category">{{ email.category }}</span>
-        <span class="badge" :class="priorityClass(email.priority)">{{ email.priority }}</span>
+      <!-- Header -->
+      <div class="mb-6">
+        <h1 class="text-2xl font-bold text-slate-900 dark:text-slate-100 tracking-tight">Inbox</h1>
+        <p class="text-sm text-slate-500 dark:text-slate-400 mt-0.5">
+          {{ emails.length }} classified email{{ emails.length !== 1 ? 's' : '' }}
+        </p>
       </div>
-      <p class="summary">{{ email.summary }}</p>
-      <p class="action">👉 {{ email.suggested_action }}</p>
-      <small class="date">{{ email.created_at }}</small>
+
+      <!-- Loading -->
+      <div v-if="loading" class="flex items-center justify-center py-24">
+        <div class="w-6 h-6 border-2 border-blue-500/30 border-t-blue-500 rounded-full animate-spin" />
+      </div>
+
+      <!-- Empty state -->
+      <div v-if="!loading && emails.length === 0" class="text-center py-24">
+        <div class="text-5xl mb-4 select-none">📭</div>
+        <p class="font-semibold text-slate-700 dark:text-slate-300">No emails yet</p>
+        <p class="text-sm text-slate-400 dark:text-slate-500 mt-1">Classified emails will appear here</p>
+      </div>
+
+      <!-- Email list -->
+      <div
+        v-for="email in emails"
+        :key="email.id"
+        class="email-card"
+        @click="openEmail(email)"
+      >
+        <div class="priority-stripe" :class="priorityStripe(email.priority)" />
+        <div class="flex-1 min-w-0 px-4 py-3.5">
+          <div class="flex items-start justify-between gap-3 mb-1.5">
+            <h3 class="text-sm font-semibold text-slate-900 dark:text-slate-100 truncate leading-snug">{{ email.subject }}</h3>
+            <small class="text-[11px] text-slate-400 dark:text-slate-500 whitespace-nowrap shrink-0 mt-0.5">{{ email.created_at }}</small>
+          </div>
+          <div class="flex items-center gap-2 mb-2">
+            <span class="badge category-badge">{{ email.category }}</span>
+            <span class="badge" :class="priorityClass(email.priority)">{{ email.priority }}</span>
+          </div>
+          <p class="text-xs text-slate-500 dark:text-slate-400 line-clamp-2 leading-relaxed">{{ email.summary }}</p>
+        </div>
+      </div>
+
     </div>
   </div>
 
   <!-- Modal -->
   <Teleport to="body">
-    <div v-if="selectedEmail" class="overlay" @click.self="closeEmail">
-      <div class="modal">
-        <button class="close-btn" @click="closeEmail">✕</button>
+    <Transition name="modal-fade">
+      <div v-if="selectedEmail" class="fixed inset-0 z-50 flex items-center justify-center p-4">
+        <div class="absolute inset-0 bg-slate-950/60 backdrop-blur-sm" @click="closeEmail" />
 
-        <h2>{{ selectedEmail.subject }}</h2>
-        <div class="meta">
-          <span class="badge category">{{ selectedEmail.category }}</span>
-          <span class="badge" :class="priorityClass(selectedEmail.priority)">{{ selectedEmail.priority }}</span>
-        </div>
-        <small class="date">{{ selectedEmail.created_at }}</small>
+        <div class="modal-card relative bg-white dark:bg-slate-900 rounded-2xl shadow-2xl w-full max-w-lg max-h-[88vh] overflow-y-auto border border-slate-200 dark:border-slate-700">
 
-        <hr class="divider" />
+          <!-- Modal header -->
+          <div class="sticky top-0 z-10 bg-white dark:bg-slate-900 border-b border-slate-100 dark:border-slate-800 px-6 pt-5 pb-4 rounded-t-2xl">
+            <div class="flex items-start gap-3">
+              <div class="flex-1 min-w-0">
+                <h2 class="text-base font-semibold text-slate-900 dark:text-slate-100 leading-snug">{{ selectedEmail.subject }}</h2>
+                <div class="flex items-center gap-2 mt-2 flex-wrap">
+                  <span class="badge category-badge">{{ selectedEmail.category }}</span>
+                  <span class="badge" :class="priorityClass(selectedEmail.priority)">{{ selectedEmail.priority }}</span>
+                  <small class="text-[11px] text-slate-400 dark:text-slate-500">{{ selectedEmail.created_at }}</small>
+                </div>
+              </div>
+              <button
+                @click="closeEmail"
+                class="shrink-0 w-7 h-7 rounded-lg flex items-center justify-center text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors text-sm"
+              >✕</button>
+            </div>
+          </div>
 
-        <div class="detail-section">
-          <p class="detail-label">Summary</p>
-          <p class="detail-value">{{ selectedEmail.summary }}</p>
-        </div>
+          <div class="p-6 space-y-5">
 
-        <div class="detail-section">
-          <p class="detail-label">Suggested Action</p>
-          <p class="detail-value action-value">👉 {{ selectedEmail.suggested_action }}</p>
-        </div>
+            <!-- Summary -->
+            <div>
+              <p class="section-label">Summary</p>
+              <p class="text-sm text-slate-700 dark:text-slate-300 leading-relaxed">{{ selectedEmail.summary }}</p>
+            </div>
 
-        <div class="detail-section">
-          <p class="detail-label">Original Email</p>
-          <pre class="email-body">{{ selectedEmail.body }}</pre>
-        </div>
+            <!-- Suggested Action -->
+            <div class="bg-blue-50 dark:bg-blue-950/40 border border-blue-100 dark:border-blue-900/50 rounded-xl p-4">
+              <p class="section-label">Suggested Action</p>
+              <p class="text-sm text-blue-900 dark:text-blue-200 leading-relaxed">{{ selectedEmail.suggested_action }}</p>
+            </div>
 
-        <hr class="divider" />
+            <!-- Original Email -->
+            <div>
+              <p class="section-label">Original Email</p>
+              <pre class="text-xs text-slate-600 dark:text-slate-300 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-4 whitespace-pre-wrap break-words leading-relaxed font-sans">{{ selectedEmail.body }}</pre>
+            </div>
 
-        <h3 class="reply-heading">Reply</h3>
+            <hr class="border-slate-100 dark:border-slate-800" />
 
-        <div v-if="replySent" class="sent-banner">
-          ✓ Reply sent
-        </div>
+            <!-- Reply -->
+            <div>
+              <h3 class="text-sm font-semibold text-slate-900 dark:text-slate-100 mb-3">Reply</h3>
 
-        <div v-else class="reply-form">
-          <label class="field-label">Subject</label>
-          <input v-model="replySubject" class="input" type="text" />
+              <div v-if="replySent" class="flex items-center gap-2.5 bg-emerald-50 dark:bg-emerald-950/50 border border-emerald-200 dark:border-emerald-900 rounded-xl p-4">
+                <span class="text-emerald-500 font-bold">✓</span>
+                <span class="text-sm font-medium text-emerald-700 dark:text-emerald-400">Reply sent</span>
+              </div>
 
-          <label class="field-label">Body</label>
-          <textarea v-model="replyBody" class="input" rows="6" placeholder="Write your reply..." />
+              <div v-else class="space-y-3">
+                <div>
+                  <label class="block text-xs font-semibold text-slate-500 dark:text-slate-400 mb-1.5">Subject</label>
+                  <input v-model="replySubject" type="text" class="reply-input" />
+                </div>
+                <div>
+                  <label class="block text-xs font-semibold text-slate-500 dark:text-slate-400 mb-1.5">Body</label>
+                  <textarea v-model="replyBody" rows="5" placeholder="Write your reply..." class="reply-input resize-none" />
+                </div>
+                <div class="flex justify-end">
+                  <button
+                    @click="sendReply"
+                    :disabled="!replyBody.trim()"
+                    class="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 disabled:bg-slate-200 dark:disabled:bg-slate-700 disabled:text-slate-400 disabled:cursor-not-allowed text-white text-sm font-semibold transition-colors"
+                  >
+                    Send Reply
+                  </button>
+                </div>
+              </div>
+            </div>
 
-          <button @click="sendReply" :disabled="!replyBody.trim()" class="send-btn">
-            Send Reply
-          </button>
+          </div>
         </div>
       </div>
-    </div>
+    </Transition>
   </Teleport>
 </template>
 
 <script setup>
-import { ref, onMounted, onUnmounted } from "vue";
+import { ref, onMounted, onUnmounted } from 'vue';
 
 const emails = ref([]);
 const loading = ref(false);
 const selectedEmail = ref(null);
-const replySubject = ref("");
-const replyBody = ref("");
+const replySubject = ref('');
+const replyBody = ref('');
 const replySent = ref(false);
-
-async function fetchEmails() {
-  loading.value = true;
-  try {
-    const res = await fetch("http://localhost:3001/emails");
-    emails.value = await res.json();
-  } catch (err) {
-    console.error(err);
-  } finally {
-    loading.value = false;
-  }
-}
 
 function priorityClass(priority) {
   return {
@@ -111,10 +150,31 @@ function priorityClass(priority) {
   };
 }
 
+function priorityStripe(priority) {
+  return {
+    'stripe-low': priority === 'Low',
+    'stripe-medium': priority === 'Medium',
+    'stripe-high': priority === 'High',
+    'stripe-critical': priority === 'Critical',
+  };
+}
+
+async function fetchEmails() {
+  loading.value = true;
+  try {
+    const res = await fetch('http://localhost:3001/emails');
+    emails.value = await res.json();
+  } catch (err) {
+    console.error(err);
+  } finally {
+    loading.value = false;
+  }
+}
+
 function openEmail(email) {
   selectedEmail.value = email;
   replySubject.value = `Re: ${email.subject}`;
-  replyBody.value = "";
+  replyBody.value = '';
   replySent.value = false;
 }
 
@@ -127,246 +187,128 @@ function sendReply() {
 }
 
 function onKeydown(e) {
-  if (e.key === "Escape") closeEmail();
+  if (e.key === 'Escape') closeEmail();
 }
 
 onMounted(() => {
   fetchEmails();
-  window.addEventListener("keydown", onKeydown);
+  window.addEventListener('keydown', onKeydown);
 });
 
 onUnmounted(() => {
-  window.removeEventListener("keydown", onKeydown);
+  window.removeEventListener('keydown', onKeydown);
 });
 </script>
 
 <style scoped>
-.container {
-  max-width: 700px;
-  margin: 40px auto;
-  font-family: system-ui;
-  padding: 20px;
-}
-
-.subtitle {
-  color: var(--color-text-muted);
-  margin-bottom: 20px;
-}
-
-.card {
-  border: 1px solid var(--color-border);
-  border-radius: 12px;
-  padding: 16px;
-  margin-bottom: 15px;
-  background: var(--color-bg-card);
-  cursor: pointer;
-  transition: background-color 0.2s, border-color 0.2s, transform 0.1s, box-shadow 0.1s;
-}
-
-.card:hover {
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
-  transform: translateY(-1px);
-}
-
-.meta {
+.email-card {
   display: flex;
-  gap: 10px;
-  margin: 10px 0;
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 14px;
+  margin-bottom: 10px;
+  cursor: pointer;
+  overflow: hidden;
+  transition: box-shadow 0.15s, transform 0.12s, border-color 0.15s;
 }
+
+html.dark .email-card {
+  background: #0f172a;
+  border-color: #1e293b;
+}
+
+.email-card:hover {
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.07);
+  transform: translateY(-1px);
+  border-color: #cbd5e1;
+}
+
+html.dark .email-card:hover {
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.4);
+  border-color: #334155;
+}
+
+.priority-stripe {
+  width: 4px;
+  flex-shrink: 0;
+}
+
+.stripe-low      { background: #22c55e; }
+.stripe-medium   { background: #eab308; }
+.stripe-high     { background: #ef4444; }
+.stripe-critical { background: linear-gradient(180deg, #a855f7, #ec4899); }
 
 .badge {
-  padding: 4px 10px;
+  display: inline-block;
+  padding: 2px 8px;
   border-radius: 999px;
-  font-size: 12px;
-  font-weight: bold;
+  font-size: 11px;
+  font-weight: 600;
 }
 
-.category {
-  background: #e0f2fe;
-  color: #0369a1;
-}
-
-.priority-low {
-  background: #dcfce7;
-  color: #15803d;
-}
-
-.priority-medium {
-  background: #fef9c3;
-  color: #a16207;
-}
-
-.priority-high {
-  background: #fee2e2;
-  color: #b91c1c;
-}
-
+.category-badge  { background: #e0f2fe; color: #0369a1; }
+.priority-low    { background: #dcfce7; color: #15803d; }
+.priority-medium { background: #fef9c3; color: #a16207; }
+.priority-high   { background: #fee2e2; color: #b91c1c; }
 .priority-critical {
   background: #1e0a2e;
   color: #e879f9;
-  box-shadow: 0 0 6px rgba(232, 121, 249, 0.4);
+  box-shadow: 0 0 5px rgba(232, 121, 249, 0.35);
 }
 
-.summary {
-  margin: 10px 0;
-}
-
-.action {
-  font-style: italic;
-  color: var(--color-text-action);
-}
-
-.date {
-  color: var(--color-text-muted);
-  font-size: 12px;
-}
-
-/* Modal */
-.overlay {
-  position: fixed;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.5);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 50;
-  padding: 20px;
-}
-
-.modal {
-  background: var(--color-bg-card);
-  border-radius: 16px;
-  padding: 28px;
-  width: 100%;
-  max-width: 620px;
-  max-height: 90vh;
-  overflow-y: auto;
-  position: relative;
-  color: var(--color-text);
-}
-
-.close-btn {
-  position: absolute;
-  top: 16px;
-  right: 16px;
-  background: none;
-  border: none;
-  font-size: 18px;
-  cursor: pointer;
-  color: var(--color-text-muted);
-  line-height: 1;
-  padding: 4px 6px;
-  border-radius: 6px;
-}
-
-.close-btn:hover {
-  color: var(--color-text);
-}
-
-.divider {
-  border: none;
-  border-top: 1px solid var(--color-border);
-  margin: 20px 0;
-}
-
-.detail-section {
-  margin-bottom: 16px;
-}
-
-.detail-label {
-  font-size: 11px;
+.section-label {
+  font-size: 10px;
   font-weight: 700;
   text-transform: uppercase;
-  letter-spacing: 0.06em;
-  color: var(--color-text-muted);
-  margin: 0 0 4px;
+  letter-spacing: 0.08em;
+  color: #94a3b8;
+  margin-bottom: 6px;
 }
 
-.detail-value {
-  margin: 0;
-  line-height: 1.6;
-}
-
-.action-value {
-  font-style: italic;
-}
-
-.email-body {
-  margin: 0;
-  white-space: pre-wrap;
-  word-break: break-word;
-  font-family: system-ui;
-  font-size: 14px;
-  line-height: 1.65;
-  background: var(--color-bg);
-  border: 1px solid var(--color-border);
-  border-radius: 8px;
-  padding: 12px 14px;
-  color: var(--color-text);
-}
-
-.reply-heading {
-  margin-bottom: 14px;
-}
-
-.reply-form {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.field-label {
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--color-text-muted);
-}
-
-.input {
+.reply-input {
   width: 100%;
-  padding: 10px 12px;
-  border-radius: 8px;
-  border: 1px solid var(--color-border-input);
-  font-size: 14px;
-  background-color: var(--color-input-bg);
-  color: var(--color-input-text);
-  font-family: system-ui;
+  padding: 9px 12px;
+  border-radius: 10px;
+  border: 1px solid #e2e8f0;
+  background: #f8fafc;
+  color: #0f172a;
+  font-size: 13px;
+  font-family: 'Inter', system-ui, sans-serif;
   box-sizing: border-box;
-  transition: border-color 0.15s;
+  transition: border-color 0.15s, box-shadow 0.15s;
 }
 
-.input:focus {
+html.dark .reply-input {
+  border-color: #334155;
+  background: #1e293b;
+  color: #f1f5f9;
+}
+
+.reply-input::placeholder { color: #94a3b8; }
+
+.reply-input:focus {
   outline: none;
   border-color: #3b82f6;
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
 }
 
-.send-btn {
-  align-self: flex-end;
-  padding: 9px 20px;
-  border: none;
-  border-radius: 8px;
-  background: #3b82f6;
-  color: white;
-  font-weight: 600;
-  cursor: pointer;
-  font-size: 14px;
-  transition: background 0.15s;
+/* Modal transition */
+.modal-fade-enter-active {
+  transition: opacity 0.2s ease;
+}
+.modal-fade-leave-active {
+  transition: opacity 0.15s ease;
+}
+.modal-fade-enter-from,
+.modal-fade-leave-to {
+  opacity: 0;
 }
 
-.send-btn:hover:not(:disabled) {
-  background: #2563eb;
+.modal-fade-enter-active .modal-card {
+  transition: transform 0.2s ease, opacity 0.2s ease;
 }
-
-.send-btn:disabled {
-  background: #93c5fd;
-  cursor: not-allowed;
-}
-
-.sent-banner {
-  background: var(--color-bg-success);
-  border: 1px solid #10b981;
-  color: #10b981;
-  border-radius: 8px;
-  padding: 12px 16px;
-  font-weight: 600;
+.modal-fade-enter-from .modal-card {
+  transform: translateY(12px) scale(0.97);
+  opacity: 0;
 }
 </style>
