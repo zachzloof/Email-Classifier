@@ -3,11 +3,12 @@
     <div class="max-w-2xl mx-auto">
 
       <!-- Header -->
-      <div class="flex items-start justify-between mb-6">
+      <div class="flex items-start justify-between mb-5">
         <div>
           <h1 class="text-2xl font-bold text-slate-900 dark:text-slate-100 tracking-tight">Inbox</h1>
           <p class="text-sm text-slate-500 dark:text-slate-400 mt-0.5">
-            {{ emails.length }} classified email{{ emails.length !== 1 ? 's' : '' }}
+            {{ filteredEmails.length }} email{{ filteredEmails.length !== 1 ? 's' : '' }}
+            <span v-if="filterCategory || filterPriority" class="text-blue-500 dark:text-blue-400"> (filtered)</span>
           </p>
         </div>
         <div class="flex items-center gap-2">
@@ -16,14 +17,46 @@
               {{ syncMessage.text }}
             </span>
           </Transition>
-          <button
-            @click="sync"
-            :disabled="syncing"
-            class="inline-flex items-center gap-2 px-3.5 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 dark:disabled:bg-blue-800 text-white text-xs font-semibold transition-colors shadow-sm"
-          >
+          <button @click="sync" :disabled="syncing" class="inline-flex items-center gap-2 px-3.5 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 dark:disabled:bg-blue-800 text-white text-xs font-semibold transition-colors shadow-sm">
             <span v-if="syncing" class="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
             {{ syncing ? 'Syncing...' : 'Sync' }}
           </button>
+        </div>
+      </div>
+
+      <!-- Toolbar -->
+      <div class="flex flex-wrap items-center gap-2 mb-4">
+        <select v-model="filterCategory" class="filter-select">
+          <option value="">All categories</option>
+          <option value="Work">Work</option>
+          <option value="Personal">Personal</option>
+          <option value="HR">HR</option>
+          <option value="Spam">Spam</option>
+        </select>
+
+        <select v-model="filterPriority" class="filter-select">
+          <option value="">All priorities</option>
+          <option value="Critical">Critical</option>
+          <option value="High">High</option>
+          <option value="Medium">Medium</option>
+          <option value="Low">Low</option>
+        </select>
+
+        <button
+          v-if="filterCategory || filterPriority"
+          @click="filterCategory = ''; filterPriority = ''"
+          class="text-xs text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 px-2 py-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+        >Clear ✕</button>
+
+        <div class="ml-auto flex items-center gap-1">
+          <span class="text-xs text-slate-400 dark:text-slate-500 mr-1">Per page:</span>
+          <button
+            v-for="size in [10, 20, 50, 100]"
+            :key="size"
+            @click="pageSize = size"
+            class="px-2.5 py-1 rounded-lg text-xs font-medium transition-colors"
+            :class="pageSize === size ? 'bg-blue-600 text-white' : 'text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800'"
+          >{{ size }}</button>
         </div>
       </div>
 
@@ -32,34 +65,107 @@
         <div class="w-6 h-6 border-2 border-blue-500/30 border-t-blue-500 rounded-full animate-spin" />
       </div>
 
-      <!-- Empty state -->
+      <!-- Empty: no emails at all -->
       <div v-if="!loading && emails.length === 0" class="text-center py-24">
         <div class="text-5xl mb-4 select-none">📭</div>
         <p class="font-semibold text-slate-700 dark:text-slate-300">No emails yet</p>
-        <p class="text-sm text-slate-400 dark:text-slate-500 mt-1">Classified emails will appear here</p>
+        <p class="text-sm text-slate-400 dark:text-slate-500 mt-1">Sync your Outlook inbox to get started</p>
       </div>
 
-      <!-- Email list -->
-      <div
-        v-for="email in emails"
-        :key="email.id"
-        class="email-card"
-        @click="openEmail(email)"
-      >
-        <div class="priority-stripe" :class="priorityStripe(email.priority)" />
-        <div class="flex-1 min-w-0 px-4 py-3.5">
-          <div class="flex items-start justify-between gap-3 mb-1.5">
-            <h3 class="text-sm font-semibold text-slate-900 dark:text-slate-100 truncate leading-snug">{{ email.subject }}</h3>
-            <small class="text-[11px] text-slate-400 dark:text-slate-500 whitespace-nowrap shrink-0 mt-0.5">{{ email.created_at }}</small>
-          </div>
-          <div class="flex items-center gap-2 mb-2">
-            <span class="badge category-badge">{{ email.category }}</span>
-            <span class="badge" :class="priorityClass(email.priority)">{{ email.priority }}</span>
-          </div>
-          <p class="text-xs text-slate-500 dark:text-slate-400 line-clamp-2 leading-relaxed">{{ email.summary }}</p>
+      <!-- Empty: filters returned nothing -->
+      <div v-if="!loading && emails.length > 0 && filteredEmails.length === 0" class="text-center py-16">
+        <p class="font-semibold text-slate-600 dark:text-slate-400">No emails match the current filters</p>
+        <button @click="filterCategory = ''; filterPriority = ''" class="text-sm text-blue-500 hover:underline mt-2">Clear filters</button>
+      </div>
+
+      <template v-if="!loading && paginatedEmails.length > 0">
+
+        <!-- Select all / bulk actions bar -->
+        <div class="flex items-center justify-between px-3 py-2 mb-2 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800">
+          <label class="flex items-center gap-2.5 cursor-pointer select-none">
+            <input
+              type="checkbox"
+              :checked="pageAllSelected"
+              :indeterminate.prop="somePageSelected && !pageAllSelected"
+              @change="togglePageAll"
+              class="w-4 h-4 rounded accent-blue-600 cursor-pointer"
+            />
+            <span class="text-xs font-medium text-slate-500 dark:text-slate-400">
+              {{ selectedIds.size > 0 ? `${selectedIds.size} selected` : 'Select all on page' }}
+            </span>
+          </label>
+          <Transition name="fade">
+            <button
+              v-if="selectedIds.size > 0"
+              @click="deleteSelected"
+              :disabled="deleting"
+              class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-red-600 hover:bg-red-700 disabled:opacity-50 text-white text-xs font-semibold transition-colors"
+            >
+              <span v-if="deleting" class="w-3 h-3 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+              Delete {{ selectedIds.size }}
+            </button>
+          </Transition>
         </div>
-      </div>
 
+        <!-- Email list -->
+        <div
+          v-for="email in paginatedEmails"
+          :key="email.id"
+          class="email-card"
+          :class="{ 'is-selected': selectedIds.has(email.id) }"
+          @click="openEmail(email)"
+        >
+          <div class="priority-stripe" :class="priorityStripe(email.priority)" />
+          <div class="checkbox-area" @click.stop>
+            <input
+              type="checkbox"
+              :checked="selectedIds.has(email.id)"
+              @change="toggleSelect(email.id)"
+              class="w-4 h-4 rounded accent-blue-600 cursor-pointer"
+            />
+          </div>
+          <div class="flex-1 min-w-0 px-4 py-3.5">
+            <div class="flex items-start justify-between gap-3 mb-1.5">
+              <h3 class="text-sm font-semibold text-slate-900 dark:text-slate-100 truncate leading-snug">{{ email.subject }}</h3>
+              <small class="text-[11px] text-slate-400 dark:text-slate-500 whitespace-nowrap shrink-0 mt-0.5">{{ email.created_at }}</small>
+            </div>
+            <div class="flex items-center gap-2 mb-2">
+              <span class="badge category-badge">{{ email.category }}</span>
+              <span class="badge" :class="priorityClass(email.priority)">{{ email.priority }}</span>
+            </div>
+            <p class="text-xs text-slate-500 dark:text-slate-400 line-clamp-2 leading-relaxed">{{ email.summary }}</p>
+          </div>
+        </div>
+
+        <!-- Pagination -->
+        <div class="flex items-center justify-between mt-4 pt-4 border-t border-slate-200 dark:border-slate-800">
+          <p class="text-xs text-slate-400 dark:text-slate-500">
+            Showing {{ (currentPage - 1) * pageSize + 1 }}–{{ Math.min(currentPage * pageSize, filteredEmails.length) }} of {{ filteredEmails.length }}
+          </p>
+          <div class="flex items-center gap-1">
+            <button
+              @click="currentPage--"
+              :disabled="currentPage === 1"
+              class="px-2.5 py-1.5 rounded-lg text-xs font-medium text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+            >← Prev</button>
+            <template v-for="p in visiblePages" :key="String(p) + 'pg'">
+              <span v-if="p === null" class="px-1 text-xs text-slate-300 dark:text-slate-600">…</span>
+              <button
+                v-else
+                @click="currentPage = p"
+                class="w-8 h-8 rounded-lg text-xs font-medium transition-colors"
+                :class="currentPage === p ? 'bg-blue-600 text-white' : 'text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800'"
+              >{{ p }}</button>
+            </template>
+            <button
+              @click="currentPage++"
+              :disabled="currentPage === totalPages"
+              class="px-2.5 py-1.5 rounded-lg text-xs font-medium text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+            >Next →</button>
+          </div>
+        </div>
+
+      </template>
     </div>
   </div>
 
@@ -68,10 +174,8 @@
     <Transition name="modal-fade">
       <div v-if="selectedEmail" class="fixed inset-0 z-50 flex items-center justify-center p-4">
         <div class="absolute inset-0 bg-slate-950/60 backdrop-blur-sm" @click="closeEmail" />
-
         <div class="modal-card relative bg-white dark:bg-slate-900 rounded-2xl shadow-2xl w-full max-w-lg max-h-[88vh] overflow-y-auto border border-slate-200 dark:border-slate-700">
 
-          <!-- Modal header -->
           <div class="sticky top-0 z-10 bg-white dark:bg-slate-900 border-b border-slate-100 dark:border-slate-800 px-6 pt-5 pb-4 rounded-t-2xl">
             <div class="flex items-start gap-3">
               <div class="flex-1 min-w-0">
@@ -82,28 +186,33 @@
                   <small class="text-[11px] text-slate-400 dark:text-slate-500">{{ selectedEmail.created_at }}</small>
                 </div>
               </div>
-              <button
-                @click="closeEmail"
-                class="shrink-0 w-7 h-7 rounded-lg flex items-center justify-center text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors text-sm"
-              >✕</button>
+              <div class="flex items-center gap-1 shrink-0">
+                <button
+                  @click="deleteSingle(selectedEmail.id)"
+                  :disabled="deleting"
+                  title="Delete email"
+                  class="w-7 h-7 rounded-lg flex items-center justify-center text-slate-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-950/40 transition-colors text-sm disabled:opacity-40"
+                >🗑</button>
+                <button
+                  @click="closeEmail"
+                  class="w-7 h-7 rounded-lg flex items-center justify-center text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors text-sm"
+                >✕</button>
+              </div>
             </div>
           </div>
 
           <div class="p-6 space-y-5">
 
-            <!-- Summary -->
             <div>
               <p class="section-label">Summary</p>
               <p class="text-sm text-slate-700 dark:text-slate-300 leading-relaxed">{{ selectedEmail.summary }}</p>
             </div>
 
-            <!-- Suggested Action -->
             <div class="bg-blue-50 dark:bg-blue-950/40 border border-blue-100 dark:border-blue-900/50 rounded-xl p-4">
               <p class="section-label">Suggested Action</p>
               <p class="text-sm text-blue-900 dark:text-blue-200 leading-relaxed">{{ selectedEmail.suggested_action }}</p>
             </div>
 
-            <!-- Original Email -->
             <div>
               <p class="section-label">Original Email</p>
               <pre class="text-xs text-slate-600 dark:text-slate-300 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-4 whitespace-pre-wrap break-words leading-relaxed font-sans">{{ selectedEmail.body }}</pre>
@@ -111,15 +220,12 @@
 
             <hr class="border-slate-100 dark:border-slate-800" />
 
-            <!-- Reply -->
             <div>
               <h3 class="text-sm font-semibold text-slate-900 dark:text-slate-100 mb-3">Reply</h3>
-
               <div v-if="replySent" class="flex items-center gap-2.5 bg-emerald-50 dark:bg-emerald-950/50 border border-emerald-200 dark:border-emerald-900 rounded-xl p-4">
                 <span class="text-emerald-500 font-bold">✓</span>
                 <span class="text-sm font-medium text-emerald-700 dark:text-emerald-400">Reply sent</span>
               </div>
-
               <div v-else class="space-y-3">
                 <div>
                   <label class="block text-xs font-semibold text-slate-500 dark:text-slate-400 mb-1.5">Subject</label>
@@ -151,18 +257,71 @@
 </template>
 
 <script setup>
-import { ref, onMounted, onUnmounted } from 'vue';
+import { ref, computed, watch, onMounted, onUnmounted } from 'vue';
 
 const emails = ref([]);
 const loading = ref(false);
+
+const filterCategory = ref('');
+const filterPriority = ref('');
+const pageSize = ref(20);
+const currentPage = ref(1);
+const selectedIds = ref(new Set());
+const deleting = ref(false);
+
 const selectedEmail = ref(null);
 const replySubject = ref('');
 const replyBody = ref('');
 const replySent = ref(false);
 const replySending = ref(false);
 const replyError = ref('');
+
 const syncing = ref(false);
 const syncMessage = ref(null);
+
+const filteredEmails = computed(() =>
+  emails.value.filter(e => {
+    if (filterCategory.value && e.category !== filterCategory.value) return false;
+    if (filterPriority.value && e.priority !== filterPriority.value) return false;
+    return true;
+  })
+);
+
+const totalPages = computed(() => Math.max(1, Math.ceil(filteredEmails.value.length / pageSize.value)));
+
+const paginatedEmails = computed(() => {
+  const start = (currentPage.value - 1) * pageSize.value;
+  return filteredEmails.value.slice(start, start + pageSize.value);
+});
+
+const pageAllSelected = computed(() =>
+  paginatedEmails.value.length > 0 && paginatedEmails.value.every(e => selectedIds.value.has(e.id))
+);
+
+const somePageSelected = computed(() =>
+  paginatedEmails.value.some(e => selectedIds.value.has(e.id))
+);
+
+const visiblePages = computed(() => {
+  const total = totalPages.value;
+  const cur = currentPage.value;
+  if (total <= 7) return Array.from({ length: total }, (_, i) => i + 1);
+  const pages = [1];
+  if (cur > 3) pages.push(null);
+  for (let i = Math.max(2, cur - 1); i <= Math.min(total - 1, cur + 1); i++) pages.push(i);
+  if (cur < total - 2) pages.push(null);
+  pages.push(total);
+  return pages;
+});
+
+watch([filterCategory, filterPriority, pageSize], () => {
+  currentPage.value = 1;
+  selectedIds.value = new Set();
+});
+
+watch(currentPage, () => {
+  selectedIds.value = new Set();
+});
 
 function priorityClass(priority) {
   return {
@@ -182,6 +341,22 @@ function priorityStripe(priority) {
   };
 }
 
+function toggleSelect(id) {
+  const next = new Set(selectedIds.value);
+  next.has(id) ? next.delete(id) : next.add(id);
+  selectedIds.value = next;
+}
+
+function togglePageAll() {
+  const next = new Set(selectedIds.value);
+  if (pageAllSelected.value) {
+    paginatedEmails.value.forEach(e => next.delete(e.id));
+  } else {
+    paginatedEmails.value.forEach(e => next.add(e.id));
+  }
+  selectedIds.value = next;
+}
+
 async function fetchEmails() {
   loading.value = true;
   try {
@@ -194,16 +369,47 @@ async function fetchEmails() {
   }
 }
 
+async function deleteEmails(ids) {
+  deleting.value = true;
+  try {
+    let res;
+    if (ids.length === 1) {
+      res = await fetch(`http://localhost:3001/emails/${ids[0]}`, { method: 'DELETE' });
+    } else {
+      res = await fetch('http://localhost:3001/emails/bulk-delete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ids }),
+      });
+    }
+    if (!res.ok) {
+      const data = await res.json();
+      throw new Error(data.error || 'Delete failed');
+    }
+    const idSet = new Set(ids);
+    if (selectedEmail.value && idSet.has(selectedEmail.value.id)) closeEmail();
+    emails.value = emails.value.filter(e => !idSet.has(e.id));
+    selectedIds.value = new Set();
+    if (currentPage.value > 1 && paginatedEmails.value.length === 0) currentPage.value--;
+  } catch (err) {
+    alert(err.message);
+  } finally {
+    deleting.value = false;
+  }
+}
+
+function deleteSelected() { deleteEmails([...selectedIds.value]); }
+function deleteSingle(id) { deleteEmails([id]); }
+
 function openEmail(email) {
   selectedEmail.value = email;
   replySubject.value = `Re: ${email.subject}`;
   replyBody.value = '';
   replySent.value = false;
+  replyError.value = '';
 }
 
-function closeEmail() {
-  selectedEmail.value = null;
-}
+function closeEmail() { selectedEmail.value = null; }
 
 async function sendReply() {
   if (!selectedEmail.value.graph_id) {
@@ -218,10 +424,7 @@ async function sendReply() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ subject: replySubject.value, body: replyBody.value }),
     });
-    if (!res.ok) {
-      const data = await res.json();
-      throw new Error(data.error || 'Failed to send reply');
-    }
+    if (!res.ok) throw new Error((await res.json()).error || 'Failed to send reply');
     replySent.value = true;
   } catch (err) {
     replyError.value = err.message;
@@ -250,129 +453,90 @@ async function sync() {
   }
 }
 
-function onKeydown(e) {
-  if (e.key === 'Escape') closeEmail();
-}
-
-onMounted(() => {
-  fetchEmails();
-  window.addEventListener('keydown', onKeydown);
-});
-
-onUnmounted(() => {
-  window.removeEventListener('keydown', onKeydown);
-});
+function onKeydown(e) { if (e.key === 'Escape') closeEmail(); }
+onMounted(() => { fetchEmails(); window.addEventListener('keydown', onKeydown); });
+onUnmounted(() => { window.removeEventListener('keydown', onKeydown); });
 </script>
 
 <style scoped>
+.filter-select {
+  padding: 6px 28px 6px 10px;
+  border-radius: 10px;
+  border: 1px solid #e2e8f0;
+  background: #fff url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%2394a3b8' stroke-width='2'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E") no-repeat right 8px center;
+  appearance: none;
+  font-size: 13px;
+  font-family: 'Inter', system-ui, sans-serif;
+  color: #374151;
+  cursor: pointer;
+  transition: border-color 0.15s;
+}
+.filter-select:focus { outline: none; border-color: #3b82f6; }
+html.dark .filter-select {
+  background-color: #1e293b;
+  border-color: #334155;
+  color: #e2e8f0;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%2364748b' stroke-width='2'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
+}
+
 .email-card {
   display: flex;
+  align-items: stretch;
   background: #ffffff;
   border: 1px solid #e2e8f0;
   border-radius: 14px;
-  margin-bottom: 10px;
+  margin-bottom: 8px;
   cursor: pointer;
   overflow: hidden;
-  transition: box-shadow 0.15s, transform 0.12s, border-color 0.15s;
+  transition: box-shadow 0.15s, transform 0.12s, border-color 0.15s, background-color 0.15s;
 }
+html.dark .email-card { background: #0f172a; border-color: #1e293b; }
+.email-card:hover { box-shadow: 0 4px 20px rgba(0,0,0,0.07); transform: translateY(-1px); border-color: #cbd5e1; }
+html.dark .email-card:hover { box-shadow: 0 4px 24px rgba(0,0,0,0.4); border-color: #334155; }
+.email-card.is-selected { border-color: #93c5fd !important; background: #eff6ff !important; }
+html.dark .email-card.is-selected { border-color: #1d4ed8 !important; background: rgba(30,64,175,0.15) !important; }
 
-html.dark .email-card {
-  background: #0f172a;
-  border-color: #1e293b;
-}
-
-.email-card:hover {
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.07);
-  transform: translateY(-1px);
-  border-color: #cbd5e1;
-}
-
-html.dark .email-card:hover {
-  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.4);
-  border-color: #334155;
-}
-
-.priority-stripe {
-  width: 4px;
+.checkbox-area {
+  display: flex;
+  align-items: center;
+  padding: 0 10px;
   flex-shrink: 0;
 }
 
+.priority-stripe { width: 4px; flex-shrink: 0; }
 .stripe-low      { background: #22c55e; }
 .stripe-medium   { background: #eab308; }
 .stripe-high     { background: #ef4444; }
 .stripe-critical { background: linear-gradient(180deg, #a855f7, #ec4899); }
 
-.badge {
-  display: inline-block;
-  padding: 2px 8px;
-  border-radius: 999px;
-  font-size: 11px;
-  font-weight: 600;
-}
-
+.badge { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 11px; font-weight: 600; }
 .category-badge  { background: #e0f2fe; color: #0369a1; }
 .priority-low    { background: #dcfce7; color: #15803d; }
 .priority-medium { background: #fef9c3; color: #a16207; }
 .priority-high   { background: #fee2e2; color: #b91c1c; }
-.priority-critical {
-  background: #1e0a2e;
-  color: #e879f9;
-  box-shadow: 0 0 5px rgba(232, 121, 249, 0.35);
-}
+.priority-critical { background: #1e0a2e; color: #e879f9; box-shadow: 0 0 5px rgba(232,121,249,0.35); }
 
 .section-label {
-  font-size: 10px;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  color: #94a3b8;
-  margin-bottom: 6px;
+  font-size: 10px; font-weight: 700; text-transform: uppercase;
+  letter-spacing: 0.08em; color: #94a3b8; margin-bottom: 6px;
 }
 
 .reply-input {
-  width: 100%;
-  padding: 9px 12px;
-  border-radius: 10px;
-  border: 1px solid #e2e8f0;
-  background: #f8fafc;
-  color: #0f172a;
-  font-size: 13px;
-  font-family: 'Inter', system-ui, sans-serif;
-  box-sizing: border-box;
-  transition: border-color 0.15s, box-shadow 0.15s;
+  width: 100%; padding: 9px 12px; border-radius: 10px;
+  border: 1px solid #e2e8f0; background: #f8fafc; color: #0f172a;
+  font-size: 13px; font-family: 'Inter', system-ui, sans-serif;
+  box-sizing: border-box; transition: border-color 0.15s, box-shadow 0.15s;
 }
-
-html.dark .reply-input {
-  border-color: #334155;
-  background: #1e293b;
-  color: #f1f5f9;
-}
-
+html.dark .reply-input { border-color: #334155; background: #1e293b; color: #f1f5f9; }
 .reply-input::placeholder { color: #94a3b8; }
+.reply-input:focus { outline: none; border-color: #3b82f6; box-shadow: 0 0 0 3px rgba(59,130,246,0.1); }
 
-.reply-input:focus {
-  outline: none;
-  border-color: #3b82f6;
-  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
-}
+.modal-fade-enter-active { transition: opacity 0.2s ease; }
+.modal-fade-leave-active { transition: opacity 0.15s ease; }
+.modal-fade-enter-from, .modal-fade-leave-to { opacity: 0; }
+.modal-fade-enter-active .modal-card { transition: transform 0.2s ease, opacity 0.2s ease; }
+.modal-fade-enter-from .modal-card { transform: translateY(12px) scale(0.97); opacity: 0; }
 
-/* Modal transition */
-.modal-fade-enter-active {
-  transition: opacity 0.2s ease;
-}
-.modal-fade-leave-active {
-  transition: opacity 0.15s ease;
-}
-.modal-fade-enter-from,
-.modal-fade-leave-to {
-  opacity: 0;
-}
-
-.modal-fade-enter-active .modal-card {
-  transition: transform 0.2s ease, opacity 0.2s ease;
-}
-.modal-fade-enter-from .modal-card {
-  transform: translateY(12px) scale(0.97);
-  opacity: 0;
-}
+.fade-enter-active, .fade-leave-active { transition: opacity 0.2s ease; }
+.fade-enter-from, .fade-leave-to { opacity: 0; }
 </style>
