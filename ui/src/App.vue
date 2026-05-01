@@ -1,5 +1,5 @@
 <template>
-  <nav class="sticky top-0 z-40 border-b border-slate-200/80 dark:border-slate-800/80 bg-white/80 dark:bg-slate-950/80 backdrop-blur-xl">
+  <nav v-if="authState?.loggedIn" class="sticky top-0 z-40 border-b border-slate-200/80 dark:border-slate-800/80 bg-white/80 dark:bg-slate-950/80 backdrop-blur-xl">
     <div class="max-w-4xl mx-auto px-6 h-16 flex items-center justify-between">
 
       <div class="flex items-center gap-2.5">
@@ -15,13 +15,26 @@
         <router-link to="/reset" class="nav-link">Reset</router-link>
       </div>
 
-      <button
-        @click="toggleDark"
-        class="w-9 h-9 rounded-lg flex items-center justify-center text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors duration-150 text-base select-none"
-        :title="isDark ? 'Switch to light mode' : 'Switch to dark mode'"
-      >
-        {{ isDark ? '☀️' : '🌙' }}
-      </button>
+      <div class="flex items-center gap-2">
+        <span class="text-xs text-slate-400 dark:text-slate-500 hidden sm:block truncate max-w-[160px]">
+          {{ authState.email }}
+        </span>
+
+        <button
+          @click="toggleDark"
+          class="w-9 h-9 rounded-lg flex items-center justify-center text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors duration-150 text-base select-none"
+          :title="isDark ? 'Switch to light mode' : 'Switch to dark mode'"
+        >
+          {{ isDark ? '☀️' : '🌙' }}
+        </button>
+
+        <button
+          @click="handleLogout"
+          class="text-xs font-medium px-3 py-1.5 rounded-lg text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 hover:text-slate-700 dark:hover:text-slate-200 transition-colors"
+        >
+          Sign out
+        </button>
+      </div>
 
     </div>
   </nav>
@@ -30,22 +43,30 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue';
+import { ref, onMounted } from "vue";
+import { useRouter } from "vue-router";
+import { authState, checkAuth, logout } from "./auth.js";
 
+const router = useRouter();
 const isDark = ref(false);
 
 function toggleDark() {
   isDark.value = !isDark.value;
-  document.documentElement.classList.toggle('dark', isDark.value);
-  localStorage.setItem('darkMode', String(isDark.value));
+  document.documentElement.classList.toggle("dark", isDark.value);
+  localStorage.setItem("darkMode", String(isDark.value));
 }
 
-onMounted(() => {
-  const saved = localStorage.getItem('darkMode');
-  if (saved === 'true') {
+async function handleLogout() {
+  await logout();
+  router.push("/login");
+}
+
+onMounted(async () => {
+  if (localStorage.getItem("darkMode") === "true") {
     isDark.value = true;
-    document.documentElement.classList.add('dark');
+    document.documentElement.classList.add("dark");
   }
+  if (authState.value === null) await checkAuth();
 });
 </script>
 

@@ -1,24 +1,16 @@
 import express from "express";
 import cors from "cors";
 import OpenAI from "openai";
-
-import { emails } from "./sampleEmails.js";
-
+import { ConfidentialClientApplication, InteractionRequiredAuthError } from "@azure/msal-node";
 import { initDB } from "./db.js";
 
+// --- DB ---
 const db = await initDB();
-
-const app = express();
-app.use(cors());
-app.use(express.json());
-
-const client = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
-});
 
 await db.exec(`
   CREATE TABLE IF NOT EXISTS emails (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
+    graph_id TEXT,
     subject TEXT,
     body TEXT,
     category TEXT,
@@ -29,30 +21,200 @@ await db.exec(`
   )
 `);
 
-await seedEmails();
+await db.exec(`
+  CREATE TABLE IF NOT EXISTS tokens (
+    id INTEGER PRIMARY KEY,
+    data TEXT
+  )
+`);
 
-async function seedEmails() {
-  for (const email of emails) {
-    const raw = await classifyEmail(email);
-    const result = JSON.parse(raw);
+// Add graph_id to existing DBs that predate this column
+try { await db.exec("ALTER TABLE emails ADD COLUMN graph_id TEXT"); } catch (_) {}
 
-    await db.run(
-      `INSERT INTO emails (subject, body, category, priority, summary, suggested_action)
-       VALUES (?, ?, ?, ?, ?, ?)`,
-      [
-        email.subject,
-        email.body,
-        result.category,
-        result.priority,
-        result.summary,
-        result.suggested_action,
-      ]
-    );
+// Unique partial index — allows multiple NULL graph_ids (legacy/sample rows) but
+// prevents duplicate real emails from being synced twice
+await db.exec(`
+  CREATE UNIQUE INDEX IF NOT EXISTS idx_emails_graph_id
+  ON emails(graph_id) WHERE graph_id IS NOT NULL
+`);
+
+// --- MSAL ---
+const cachePlugin = {
+  beforeCacheAccess: async (ctx) => {
+    const row = await db.get("SELECT data FROM tokens WHERE id = 1");
+    if (row) ctx.tokenCache.deserialize(row.data);
+  },
+  afterCacheAccess: async (ctx) => {
+    if (ctx.cacheHasChanged) {
+      await db.run("INSERT OR REPLACE INTO tokens (id, data) VALUES (1, ?)", [
+        ctx.tokenCache.serialize(),
+      ]);
+    }
+  },
+};
+
+const msalClient = new ConfidentialClientApplication({
+  auth: {
+    clientId: process.env.MS_CLIENT_ID,
+    authority: "https://login.microsoftonline.com/consumers",
+    clientSecret: process.env.MS_CLIENT_SECRET,
+  },
+  cache: { cachePlugin },
+});
+
+const SCOPES = [
+  "https://graph.microsoft.com/Mail.Read",
+  "https://graph.microsoft.com/Mail.Send",
+  "https://graph.microsoft.com/User.Read",
+  "offline_access",
+];
+
+const REDIRECT_URI = "http://localhost:3001/auth/callback";
+const FRONTEND_URL = "http://localhost:5173";
+
+// --- Express ---
+const app = express();
+app.use(cors());
+app.use(express.json());
+
+// --- OpenAI ---
+const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+
+// --- Helpers ---
+async function getAccessToken() {
+  const accounts = await msalClient.getTokenCache().getAllAccounts();
+  if (!accounts.length) throw Object.assign(new Error("NOT_AUTHENTICATED"), { status: 401 });
+
+  try {
+    const result = await msalClient.acquireTokenSilent({ account: accounts[0], scopes: SCOPES });
+    return result.accessToken;
+  } catch (e) {
+    if (e instanceof InteractionRequiredAuthError) {
+      throw Object.assign(new Error("NOT_AUTHENTICATED"), { status: 401 });
+    }
+    throw e;
   }
-
-  console.log("Seeded emails into DB");
 }
 
+async function graphFetch(method, path, body = null, extraHeaders = {}) {
+  const token = await getAccessToken();
+  const res = await fetch(`https://graph.microsoft.com/v1.0${path}`, {
+    method,
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+      ...extraHeaders,
+    },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+
+  if (!res.ok) throw new Error(`Graph ${method} ${path} — ${await res.text()}`);
+  if (res.status === 202 || res.status === 204) return null;
+  return res.json();
+}
+
+function stripHtml(html) {
+  return html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+}
+
+// --- Auth ---
+app.get("/auth/login", async (req, res) => {
+  const url = await msalClient.getAuthCodeUrl({ scopes: SCOPES, redirectUri: REDIRECT_URI, prompt: "select_account" });
+  res.redirect(url);
+});
+
+app.get("/auth/callback", async (req, res) => {
+  try {
+    await msalClient.acquireTokenByCode({
+      code: req.query.code,
+      scopes: SCOPES,
+      redirectUri: REDIRECT_URI,
+    });
+    res.redirect(FRONTEND_URL);
+  } catch (err) {
+    res.status(500).send("Auth failed: " + err.message);
+  }
+});
+
+app.get("/auth/status", async (req, res) => {
+  const accounts = await msalClient.getTokenCache().getAllAccounts();
+  if (accounts.length) {
+    res.json({ loggedIn: true, email: accounts[0].username, name: accounts[0].name });
+  } else {
+    res.json({ loggedIn: false });
+  }
+});
+
+app.post("/auth/logout", async (req, res) => {
+  const cache = msalClient.getTokenCache();
+  for (const account of await cache.getAllAccounts()) {
+    await cache.removeAccount(account);
+  }
+  res.json({ success: true });
+});
+
+// --- Sync ---
+app.post("/sync", async (req, res) => {
+  try {
+    const fourWeeksAgo = new Date(Date.now() - 28 * 24 * 60 * 60 * 1000).toISOString();
+    const data = await graphFetch(
+      "GET",
+      `/me/mailFolders/inbox/messages?$select=id,subject,body,from,receivedDateTime&$top=200&$orderby=receivedDateTime desc&$filter=receivedDateTime ge ${fourWeeksAgo}`,
+      null,
+      { Prefer: 'outlook.body-content-type="text"' }
+    );
+
+    let added = 0;
+    for (const msg of data.value) {
+      const existing = await db.get("SELECT id FROM emails WHERE graph_id = ?", [msg.id]);
+      if (existing) continue;
+
+      const bodyText =
+        msg.body?.contentType === "html"
+          ? stripHtml(msg.body.content)
+          : msg.body?.content ?? "";
+
+      const raw = await classifyEmail({ subject: msg.subject, body: bodyText });
+      const result = JSON.parse(raw);
+
+      await db.run(
+        `INSERT OR IGNORE INTO emails (graph_id, subject, body, category, priority, summary, suggested_action)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        [msg.id, msg.subject, bodyText, result.category, result.priority, result.summary, result.suggested_action]
+      );
+      added++;
+    }
+
+    res.json({ added, total: data.value.length });
+  } catch (err) {
+    if (err.status === 401) return res.status(401).json({ error: "Not authenticated" });
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// --- Reply ---
+app.post("/reply/:graphId", async (req, res) => {
+  const { graphId } = req.params;
+  const { subject, body } = req.body;
+
+  try {
+    const draft = await graphFetch("POST", `/me/messages/${graphId}/createReply`, {});
+
+    await graphFetch("PATCH", `/me/messages/${draft.id}`, {
+      subject,
+      body: { contentType: "Text", content: body },
+    });
+
+    await graphFetch("POST", `/me/messages/${draft.id}/send`, {});
+
+    res.json({ success: true });
+  } catch (err) {
+    if (err.status === 401) return res.status(401).json({ error: "Not authenticated" });
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// --- Classify ---
 async function classifyEmail(email) {
   const response = await client.responses.create({
     model: "gpt-4.1-mini",
@@ -90,14 +252,14 @@ suggested_action: A specific, concrete instruction for the recipient. Not "respo
             category: { type: "string", enum: ["Work", "Personal", "Spam", "HR"] },
             priority: { type: "string", enum: ["Critical", "High", "Medium", "Low"] },
             summary: { type: "string" },
-            suggested_action: { type: "string" }
+            suggested_action: { type: "string" },
           },
           required: ["category", "priority", "summary", "suggested_action"],
-          additionalProperties: false
+          additionalProperties: false,
         },
-        strict: true
-      }
-    }
+        strict: true,
+      },
+    },
   });
 
   return response.output_text;
@@ -106,37 +268,25 @@ suggested_action: A specific, concrete instruction for the recipient. Not "respo
 app.post("/classify", async (req, res) => {
   let raw;
   try {
-    
     raw = await classifyEmail(req.body);
-    const parsed = JSON.parse(raw);
-
-    return res.json(parsed);
-
+    return res.json(JSON.parse(raw));
   } catch (err) {
-    return res.status(500).json({
-      error: "Failed to parse model output",
-      details: err.message,
-      raw: raw
-    });
+    return res.status(500).json({ error: "Failed to parse model output", details: err.message, raw });
   }
 });
 
 app.get("/emails", async (req, res) => {
-  const emails = await db.all(
-    `SELECT * FROM emails ORDER BY created_at DESC`
-  );
+  const emails = await db.all("SELECT * FROM emails ORDER BY created_at DESC");
   res.json(emails);
 });
 
 app.post("/reset", async (req, res) => {
   try {
-    await db.exec(`DELETE FROM emails`);
+    await db.exec("DELETE FROM emails");
     res.json({ message: "Database cleared" });
   } catch (err) {
     res.status(500).json({ error: "Failed to reset DB" });
   }
 });
 
-app.listen(3001, () => {
-  console.log("Server running on http://localhost:3001");
-});
+app.listen(3001, () => console.log("Server running on http://localhost:3001"));
