@@ -1,0 +1,36 @@
+@import "tailwindcss";
+
+:root {
+  --color-bg: #ffffff;
+  --color-bg-card: #ffffff;
+  --color-bg-success: #ecfdf5;
+  --color-bg-error: #fef2f2;
+  --color-text: #111827;
+  --color-text-muted: #6b7280;
+  --color-text-action: #374151;
+  --color-border: #e5e7eb;
+  --color-border-input: #d1d5db;
+  --color-input-bg: #ffffff;
+  --color-input-text: #111827;
+}
+
+html.dark {
+  color-scheme: dark;
+  --color-bg: #111827;
+  --color-bg-card: #1f2937;
+  --color-bg-success: #064e3b;
+  --color-bg-error: #450a0a;
+  --color-text: #f9fafb;
+  --color-text-muted: #9ca3af;
+  --color-text-action: #d1d5db;
+  --color-border: #374151;
+  --color-border-input: #374151;
+  --color-input-bg: #1f2937;
+  --color-input-text: #f9fafb;
+}
+
+body {
+  background-color: var(--color-bg);
+  color: var(--color-text);
+  transition: background-color 0.2s, color 0.2s;
+}

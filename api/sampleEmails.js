@@ -6,5 +6,9 @@ export const emails = [
   {
     subject: "Big sale this weekend!",
     body: "Everything is 50% off, limited time only."
+  },
+  {
+    subject: "Server is down!",
+    body: "The main server is down... I need you to fix this within the next 2 hours! This is a critical issue"
   }
 ];

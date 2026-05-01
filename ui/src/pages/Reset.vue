@@ -50,10 +50,11 @@ async function resetDB() {
   max-width: 600px;
   margin: 50px auto;
   font-family: system-ui;
+  padding: 20px;
 }
 
 .warning {
-  color: #b91c1c;
+  color: #ef4444;
   margin-bottom: 20px;
 }
 
@@ -70,12 +71,12 @@ async function resetDB() {
 }
 
 .success {
-  color: green;
+  color: #10b981;
   margin-top: 10px;
 }
 
 .error {
-  color: red;
+  color: #ef4444;
   margin-top: 10px;
 }
 </style>

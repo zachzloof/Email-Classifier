@@ -14,7 +14,7 @@
       <h2>Result</h2>
       <p><strong>Category:</strong> {{ result.category }}</p>
       <p><strong>Priority:</strong> {{ result.priority }}</p>
-      <p><strong>summary:</strong> {{ result.summary }}</p>
+      <p><strong>Summary:</strong> {{ result.summary }}</p>
       <p><strong>Suggested Action:</strong> {{ result.suggested_action }}</p>
     </div>
 
@@ -90,7 +90,7 @@ h1 {
 }
 
 .subtitle {
-  color: #666;
+  color: var(--color-text-muted);
   margin-bottom: 20px;
 }
 
@@ -98,9 +98,12 @@ h1 {
   width: 100%;
   padding: 12px;
   border-radius: 10px;
-  border: 1px solid #ddd;
+  border: 1px solid var(--color-border-input);
   font-size: 14px;
   margin-bottom: 10px;
+  background-color: var(--color-input-bg);
+  color: var(--color-input-text);
+  transition: background-color 0.2s, border-color 0.2s, color 0.2s;
 }
 
 .button {
@@ -122,15 +125,16 @@ h1 {
   margin-top: 20px;
   padding: 16px;
   border-radius: 12px;
+  transition: background-color 0.2s, border-color 0.2s;
 }
 
 .success {
-  background: #ecfdf5;
+  background: var(--color-bg-success);
   border: 1px solid #10b981;
 }
 
 .error {
-  background: #fef2f2;
+  background: var(--color-bg-error);
   border: 1px solid #ef4444;
 }
 
