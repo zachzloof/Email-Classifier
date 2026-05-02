@@ -17,7 +17,7 @@
               {{ syncMessage.text }}
             </span>
           </Transition>
-          <button @click="sync" :disabled="syncing" class="inline-flex items-center gap-2 px-3.5 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 dark:disabled:bg-blue-800 text-white text-xs font-semibold transition-colors shadow-sm">
+          <button @click="showSyncModal = true" :disabled="syncing" class="inline-flex items-center gap-2 px-3.5 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 dark:disabled:bg-blue-800 text-white text-xs font-semibold transition-colors shadow-sm">
             <span v-if="syncing" class="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
             {{ syncing ? 'Syncing...' : 'Sync' }}
           </button>
@@ -40,6 +40,13 @@
           <option value="High">High</option>
           <option value="Medium">Medium</option>
           <option value="Low">Low</option>
+        </select>
+
+        <select v-model="sortBy" class="filter-select">
+          <option value="received_desc">Newest first</option>
+          <option value="received_asc">Oldest first</option>
+          <option value="priority_asc">Priority (highest)</option>
+          <option value="priority_desc">Priority (lowest)</option>
         </select>
 
         <button
@@ -77,6 +84,14 @@
         <p class="font-semibold text-slate-600 dark:text-slate-400">No emails match the current filters</p>
         <button @click="filterCategory = ''; filterPriority = ''" class="text-sm text-blue-500 hover:underline mt-2">Clear filters</button>
       </div>
+
+      <!-- Delete error banner -->
+      <Transition name="fade">
+        <div v-if="deleteError" class="flex items-center justify-between px-4 py-3 mb-3 rounded-xl bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-900/50">
+          <p class="text-xs font-medium text-red-700 dark:text-red-400">{{ deleteError }}</p>
+          <button @click="deleteError = ''" class="text-red-400 hover:text-red-600 dark:hover:text-red-300 ml-3 text-sm leading-none">✕</button>
+        </div>
+      </Transition>
 
       <template v-if="!loading && paginatedEmails.length > 0">
 
@@ -127,7 +142,7 @@
           <div class="flex-1 min-w-0 px-4 py-3.5">
             <div class="flex items-start justify-between gap-3 mb-1.5">
               <h3 class="text-sm font-semibold text-slate-900 dark:text-slate-100 truncate leading-snug">{{ email.subject }}</h3>
-              <small class="text-[11px] text-slate-400 dark:text-slate-500 whitespace-nowrap shrink-0 mt-0.5">{{ email.created_at }}</small>
+              <small class="text-[11px] text-slate-400 dark:text-slate-500 whitespace-nowrap shrink-0 mt-0.5">{{ formatDate(email.received_at || email.created_at) }}</small>
             </div>
             <div class="flex items-center gap-2 mb-2">
               <span class="badge category-badge">{{ email.category }}</span>
@@ -169,6 +184,30 @@
     </div>
   </div>
 
+  <!-- Sync options modal -->
+  <Teleport to="body">
+    <Transition name="modal-fade">
+      <div v-if="showSyncModal" class="fixed inset-0 z-50 flex items-center justify-center p-4">
+        <div class="absolute inset-0 bg-slate-950/60 backdrop-blur-sm" @click="showSyncModal = false" />
+        <div class="modal-card relative bg-white dark:bg-slate-900 rounded-2xl shadow-2xl w-full max-w-sm border border-slate-200 dark:border-slate-700 p-6">
+          <h2 class="text-base font-semibold text-slate-900 dark:text-slate-100 mb-1">Sync Emails</h2>
+          <p class="text-sm text-slate-500 dark:text-slate-400 mb-5">Which emails would you like to sync?</p>
+          <div class="space-y-2">
+            <button @click="startSync(false)" class="w-full px-4 py-3 rounded-xl border border-slate-200 dark:border-slate-700 hover:border-blue-400 dark:hover:border-blue-600 hover:bg-blue-50 dark:hover:bg-blue-950/30 transition-colors text-left">
+              <p class="text-sm font-semibold text-slate-900 dark:text-slate-100">All Inbox</p>
+              <p class="text-xs text-slate-500 dark:text-slate-400 mt-0.5">Sync all emails from the past 4 weeks</p>
+            </button>
+            <button @click="startSync(true)" class="w-full px-4 py-3 rounded-xl border border-slate-200 dark:border-slate-700 hover:border-blue-400 dark:hover:border-blue-600 hover:bg-blue-50 dark:hover:bg-blue-950/30 transition-colors text-left">
+              <p class="text-sm font-semibold text-slate-900 dark:text-slate-100">Focused only</p>
+              <p class="text-xs text-slate-500 dark:text-slate-400 mt-0.5">Only sync emails Outlook considers important</p>
+            </button>
+          </div>
+          <button @click="showSyncModal = false" class="mt-4 w-full text-xs text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 transition-colors py-1">Cancel</button>
+        </div>
+      </div>
+    </Transition>
+  </Teleport>
+
   <!-- Modal -->
   <Teleport to="body">
     <Transition name="modal-fade">
@@ -183,7 +222,7 @@
                 <div class="flex items-center gap-2 mt-2 flex-wrap">
                   <span class="badge category-badge">{{ selectedEmail.category }}</span>
                   <span class="badge" :class="priorityClass(selectedEmail.priority)">{{ selectedEmail.priority }}</span>
-                  <small class="text-[11px] text-slate-400 dark:text-slate-500">{{ selectedEmail.created_at }}</small>
+                  <small class="text-[11px] text-slate-400 dark:text-slate-500">{{ formatDate(selectedEmail.received_at || selectedEmail.created_at) }}</small>
                 </div>
               </div>
               <div class="flex items-center gap-1 shrink-0">
@@ -264,8 +303,22 @@ const loading = ref(false);
 
 const filterCategory = ref('');
 const filterPriority = ref('');
+const sortBy = ref('received_desc');
 const pageSize = ref(20);
 const currentPage = ref(1);
+
+const PRIORITY_ORDER = { Critical: 0, High: 1, Medium: 2, Low: 3 };
+
+function formatDate(dateStr) {
+  if (!dateStr) return '';
+  const date = new Date(dateStr);
+  const now = new Date();
+  const isToday = date.toDateString() === now.toDateString();
+  const isThisYear = date.getFullYear() === now.getFullYear();
+  if (isToday) return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  if (isThisYear) return date.toLocaleDateString([], { day: 'numeric', month: 'short' }) + ', ' + date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  return date.toLocaleDateString([], { day: 'numeric', month: 'short', year: 'numeric' });
+}
 const selectedIds = ref(new Set());
 const deleting = ref(false);
 
@@ -278,14 +331,28 @@ const replyError = ref('');
 
 const syncing = ref(false);
 const syncMessage = ref(null);
+const showSyncModal = ref(false);
+const deleteError = ref('');
 
-const filteredEmails = computed(() =>
-  emails.value.filter(e => {
+const filteredEmails = computed(() => {
+  const result = emails.value.filter(e => {
     if (filterCategory.value && e.category !== filterCategory.value) return false;
     if (filterPriority.value && e.priority !== filterPriority.value) return false;
     return true;
-  })
-);
+  });
+
+  return result.sort((a, b) => {
+    const dateA = new Date(a.received_at || a.created_at);
+    const dateB = new Date(b.received_at || b.created_at);
+    switch (sortBy.value) {
+      case 'received_asc':  return dateA - dateB;
+      case 'received_desc': return dateB - dateA;
+      case 'priority_asc':  return (PRIORITY_ORDER[a.priority] ?? 4) - (PRIORITY_ORDER[b.priority] ?? 4);
+      case 'priority_desc': return (PRIORITY_ORDER[b.priority] ?? 4) - (PRIORITY_ORDER[a.priority] ?? 4);
+      default: return dateB - dateA;
+    }
+  });
+});
 
 const totalPages = computed(() => Math.max(1, Math.ceil(filteredEmails.value.length / pageSize.value)));
 
@@ -314,7 +381,7 @@ const visiblePages = computed(() => {
   return pages;
 });
 
-watch([filterCategory, filterPriority, pageSize], () => {
+watch([filterCategory, filterPriority, sortBy, pageSize], () => {
   currentPage.value = 1;
   selectedIds.value = new Set();
 });
@@ -371,6 +438,7 @@ async function fetchEmails() {
 
 async function deleteEmails(ids) {
   deleting.value = true;
+  deleteError.value = '';
   try {
     let res;
     if (ids.length === 1) {
@@ -392,7 +460,7 @@ async function deleteEmails(ids) {
     selectedIds.value = new Set();
     if (currentPage.value > 1 && paginatedEmails.value.length === 0) currentPage.value--;
   } catch (err) {
-    alert(err.message);
+    deleteError.value = err.message;
   } finally {
     deleting.value = false;
   }
@@ -433,16 +501,26 @@ async function sendReply() {
   }
 }
 
-async function sync() {
+function startSync(focused) {
+  showSyncModal.value = false;
+  sync(focused);
+}
+
+async function sync(focused = false) {
   syncing.value = true;
   syncMessage.value = null;
   try {
-    const res = await fetch('http://localhost:3001/sync', { method: 'POST' });
+    const res = await fetch('http://localhost:3001/sync', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ focused }),
+    });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'Sync failed');
+    const label = focused ? 'focused ' : '';
     syncMessage.value = {
       type: 'success',
-      text: data.added > 0 ? `+${data.added} new email${data.added !== 1 ? 's' : ''}` : 'Already up to date',
+      text: data.added > 0 ? `+${data.added} new ${label}email${data.added !== 1 ? 's' : ''}` : 'Already up to date',
     };
     if (data.added > 0) await fetchEmails();
   } catch (err) {

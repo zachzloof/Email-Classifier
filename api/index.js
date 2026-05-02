@@ -35,8 +35,9 @@ await db.exec(`
   )
 `);
 
-// Add graph_id to existing DBs that predate this column
+// Add columns to existing DBs that predate them
 try { await db.exec("ALTER TABLE emails ADD COLUMN graph_id TEXT"); } catch (_) {}
+try { await db.exec("ALTER TABLE emails ADD COLUMN received_at TEXT"); } catch (_) {}
 
 // Unique partial index — allows multiple NULL graph_ids (legacy/sample rows) but
 // prevents duplicate real emails from being synced twice
@@ -70,7 +71,7 @@ const msalClient = new ConfidentialClientApplication({
 });
 
 const SCOPES = [
-  "https://graph.microsoft.com/Mail.Read",
+  "https://graph.microsoft.com/Mail.ReadWrite",
   "https://graph.microsoft.com/Mail.Send",
   "https://graph.microsoft.com/User.Read",
   "offline_access",
@@ -163,10 +164,14 @@ app.post("/auth/logout", async (req, res) => {
 // --- Sync ---
 app.post("/sync", async (req, res) => {
   try {
+    const focused = req.body?.focused === true;
     const fourWeeksAgo = new Date(Date.now() - 28 * 24 * 60 * 60 * 1000).toISOString();
+    const filter = focused
+      ? `receivedDateTime ge ${fourWeeksAgo} and inferenceClassification eq 'focused'`
+      : `receivedDateTime ge ${fourWeeksAgo}`;
     const data = await graphFetch(
       "GET",
-      `/me/mailFolders/inbox/messages?$select=id,subject,body,from,receivedDateTime&$top=200&$orderby=receivedDateTime desc&$filter=receivedDateTime ge ${fourWeeksAgo}`,
+      `/me/mailFolders/inbox/messages?$select=id,subject,body,from,receivedDateTime&$top=200&$orderby=receivedDateTime desc&$filter=${encodeURIComponent(filter)}`,
       null,
       { Prefer: 'outlook.body-content-type="text"' }
     );
@@ -190,9 +195,9 @@ app.post("/sync", async (req, res) => {
       const result = JSON.parse(raw);
 
       await db.run(
-        `INSERT OR IGNORE INTO emails (graph_id, subject, body, category, priority, summary, suggested_action)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`,
-        [msg.id, msg.subject, bodyText, result.category, result.priority, result.summary, result.suggested_action]
+        `INSERT OR IGNORE INTO emails (graph_id, subject, body, category, priority, summary, suggested_action, received_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        [msg.id, msg.subject, bodyText, result.category, result.priority, result.summary, result.suggested_action, msg.receivedDateTime ?? null]
       );
       added++;
     }
@@ -298,11 +303,7 @@ app.delete("/emails/:id", async (req, res) => {
     if (!email) return res.status(404).json({ error: "Email not found" });
 
     if (email.graph_id) {
-      try {
-        await graphFetch("POST", `/me/messages/${email.graph_id}/move`, { destinationId: "deleteditems" });
-      } catch (e) {
-        console.warn("Outlook move-to-trash failed (still deleting locally):", e.message);
-      }
+      await graphFetch("POST", `/me/messages/${email.graph_id}/move`, { destinationId: "deleteditems" });
       await db.run("INSERT OR IGNORE INTO deleted_graph_ids (graph_id) VALUES (?)", [email.graph_id]);
     }
 
@@ -323,13 +324,16 @@ app.post("/emails/bulk-delete", async (req, res) => {
     const placeholders = ids.map(() => "?").join(",");
     const rows = await db.all(`SELECT id, graph_id FROM emails WHERE id IN (${placeholders})`, ids);
 
+    // Attempt all Outlook moves first — if any fail the catch block aborts before touching the local DB
     for (const row of rows) {
       if (row.graph_id) {
-        try {
-          await graphFetch("POST", `/me/messages/${row.graph_id}/move`, { destinationId: "deleteditems" });
-        } catch (e) {
-          console.warn(`Outlook move-to-trash failed for ${row.graph_id}:`, e.message);
-        }
+        await graphFetch("POST", `/me/messages/${row.graph_id}/move`, { destinationId: "deleteditems" });
+      }
+    }
+
+    // All Outlook moves succeeded — safe to update local state
+    for (const row of rows) {
+      if (row.graph_id) {
         await db.run("INSERT OR IGNORE INTO deleted_graph_ids (graph_id) VALUES (?)", [row.graph_id]);
       }
     }
