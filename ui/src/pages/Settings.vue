@@ -27,19 +27,15 @@
         <div class="space-y-4">
           <div
             v-for="category in categories"
-            :key="category.builtin ? `builtin-${category.name}` : category.id"
+            :key="category.id"
             class="flex items-center justify-between p-4 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/50"
           >
             <div class="flex-1">
-              <div class="flex items-center gap-2">
-                <h3 class="font-medium text-slate-900 dark:text-slate-100">{{ category.name }}</h3>
-                <span v-if="category.builtin" class="text-[10px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded bg-slate-200 dark:bg-slate-700 text-slate-500 dark:text-slate-400">Built-in</span>
-              </div>
+              <h3 class="font-medium text-slate-900 dark:text-slate-100">{{ category.name }}</h3>
               <p class="text-sm text-slate-600 dark:text-slate-400 mt-1">{{ category.description }}</p>
             </div>
             <div class="flex items-center gap-2 ml-4">
               <button
-                v-if="!category.builtin"
                 @click="editCategory(category)"
                 class="p-2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 transition-colors"
                 title="Edit"
@@ -47,7 +43,6 @@
                 ✏️
               </button>
               <button
-                v-if="!category.builtin"
                 @click="deleteCategory(category)"
                 class="p-2 text-slate-400 hover:text-red-500 transition-colors"
                 title="Delete"

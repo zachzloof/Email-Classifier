@@ -43,6 +43,18 @@ async function initUserSchema(db) {
     )
   `);
 
+  const defaults = [
+    ["Work", "professional tasks, projects, clients, colleagues"],
+    ["Personal", "friends, family, personal life"],
+    ["Spam", "unsolicited, promotional, or irrelevant email"],
+  ];
+  for (const [name, description] of defaults) {
+    await db.run(
+      "INSERT OR IGNORE INTO custom_categories (name, description) VALUES (?, ?)",
+      [name, description]
+    );
+  }
+
   try { await db.exec("ALTER TABLE emails ADD COLUMN graph_id TEXT"); } catch (_) {}
   try { await db.exec("ALTER TABLE emails ADD COLUMN received_at TEXT"); } catch (_) {}
 

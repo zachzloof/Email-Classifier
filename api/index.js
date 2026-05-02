@@ -147,7 +147,8 @@ app.post("/sync", async (req, res) => {
     // Expire tombstones older than 4 weeks (matches the sync window)
     await db.run(`DELETE FROM deleted_graph_ids WHERE deleted_at < datetime('now', '-28 days')`);
 
-    const customCategories = await db.all("SELECT name, description FROM custom_categories");
+    const categoryRows = await db.all("SELECT name, description FROM custom_categories ORDER BY id ASC");
+    const categories = categoryRows.length ? categoryRows : DEFAULT_CATEGORIES;
 
     let added = 0;
     for (const msg of data.value) {
@@ -161,7 +162,7 @@ app.post("/sync", async (req, res) => {
           ? stripHtml(msg.body.content)
           : msg.body?.content ?? "";
 
-      const raw = await classifyEmail({ subject: msg.subject, body: bodyText }, customCategories);
+      const raw = await classifyEmail({ subject: msg.subject, body: bodyText }, categories);
       const result = JSON.parse(raw);
 
       await db.run(
@@ -202,16 +203,15 @@ app.post("/reply/:graphId", async (req, res) => {
 });
 
 // --- Classify ---
-const BUILTIN_CATEGORIES = [
+const DEFAULT_CATEGORIES = [
   { name: "Work", description: "professional tasks, projects, clients, colleagues" },
   { name: "Personal", description: "friends, family, personal life" },
   { name: "Spam", description: "unsolicited, promotional, or irrelevant email" },
 ];
 
-async function classifyEmail(email, customCategories = []) {
-  const allCategories = [...BUILTIN_CATEGORIES, ...customCategories];
-  const categoryEnum = allCategories.map((c) => c.name);
-  const categoryDescriptions = allCategories.map((c) => `  - ${c.name}: ${c.description}`).join("\n");
+async function classifyEmail(email, categories = []) {
+  const categoryEnum = categories.map((c) => c.name);
+  const categoryDescriptions = categories.map((c) => `  - ${c.name}: ${c.description}`).join("\n");
 
   const response = await client.responses.create({
     model: "gpt-4.1-mini",
@@ -262,12 +262,13 @@ suggested_action: A specific, concrete instruction for the recipient. Not "respo
 app.post("/classify", async (req, res) => {
   let raw;
   try {
-    let customCategories = [];
+    let categories = DEFAULT_CATEGORIES;
     try {
       const db = await getDb();
-      customCategories = await db.all("SELECT name, description FROM custom_categories");
+      const rows = await db.all("SELECT name, description FROM custom_categories ORDER BY id ASC");
+      if (rows.length) categories = rows;
     } catch (_) {}
-    raw = await classifyEmail(req.body, customCategories);
+    raw = await classifyEmail(req.body, categories);
     return res.json(JSON.parse(raw));
   } catch (err) {
     return res.status(500).json({ error: "Failed to parse model output", details: err.message, raw });
@@ -278,9 +279,7 @@ app.post("/classify", async (req, res) => {
 app.get("/categories", async (req, res) => {
   try {
     const db = await getDb();
-    const custom = await db.all("SELECT * FROM custom_categories ORDER BY created_at ASC");
-    const builtin = BUILTIN_CATEGORIES.map((c) => ({ id: null, ...c, builtin: true }));
-    res.json([...builtin, ...custom.map((c) => ({ ...c, builtin: false }))]);
+    res.json(await db.all("SELECT id, name, description FROM custom_categories ORDER BY id ASC"));
   } catch (err) {
     if (err.status === 401) return res.status(401).json({ error: "Not authenticated" });
     res.status(500).json({ error: err.message });
@@ -288,14 +287,10 @@ app.get("/categories", async (req, res) => {
 });
 
 app.post("/categories", async (req, res) => {
-  const { name, description } = req.body;
-  const trimmedName = name?.trim();
-  const trimmedDesc = description?.trim();
+  const trimmedName = req.body.name?.trim();
+  const trimmedDesc = req.body.description?.trim();
   if (!trimmedName || !trimmedDesc) {
     return res.status(400).json({ error: "Name and description are required" });
-  }
-  if (BUILTIN_CATEGORIES.some((c) => c.name.toLowerCase() === trimmedName.toLowerCase())) {
-    return res.status(400).json({ error: "Cannot use a built-in category name" });
   }
   try {
     const db = await getDb();
@@ -303,7 +298,7 @@ app.post("/categories", async (req, res) => {
       "INSERT INTO custom_categories (name, description) VALUES (?, ?)",
       [trimmedName, trimmedDesc]
     );
-    res.json({ id: result.lastID, name: trimmedName, description: trimmedDesc, builtin: false });
+    res.json({ id: result.lastID, name: trimmedName, description: trimmedDesc });
   } catch (err) {
     if (err.status === 401) return res.status(401).json({ error: "Not authenticated" });
     if (err.code === "SQLITE_CONSTRAINT") return res.status(409).json({ error: "A category with this name already exists" });
@@ -312,14 +307,10 @@ app.post("/categories", async (req, res) => {
 });
 
 app.put("/categories/:id", async (req, res) => {
-  const { name, description } = req.body;
-  const trimmedName = name?.trim();
-  const trimmedDesc = description?.trim();
+  const trimmedName = req.body.name?.trim();
+  const trimmedDesc = req.body.description?.trim();
   if (!trimmedName || !trimmedDesc) {
     return res.status(400).json({ error: "Name and description are required" });
-  }
-  if (BUILTIN_CATEGORIES.some((c) => c.name.toLowerCase() === trimmedName.toLowerCase())) {
-    return res.status(400).json({ error: "Cannot use a built-in category name" });
   }
   try {
     const db = await getDb();
@@ -328,7 +319,7 @@ app.put("/categories/:id", async (req, res) => {
       [trimmedName, trimmedDesc, req.params.id]
     );
     if (result.changes === 0) return res.status(404).json({ error: "Category not found" });
-    res.json({ id: Number(req.params.id), name: trimmedName, description: trimmedDesc, builtin: false });
+    res.json({ id: Number(req.params.id), name: trimmedName, description: trimmedDesc });
   } catch (err) {
     if (err.status === 401) return res.status(401).json({ error: "Not authenticated" });
     if (err.code === "SQLITE_CONSTRAINT") return res.status(409).json({ error: "A category with this name already exists" });
@@ -341,6 +332,20 @@ app.delete("/categories/:id", async (req, res) => {
     const db = await getDb();
     const result = await db.run("DELETE FROM custom_categories WHERE id = ?", [req.params.id]);
     if (result.changes === 0) return res.status(404).json({ error: "Category not found" });
+    res.json({ success: true });
+  } catch (err) {
+    if (err.status === 401) return res.status(401).json({ error: "Not authenticated" });
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post("/reset-categories", async (req, res) => {
+  try {
+    const db = await getDb();
+    await db.run("DELETE FROM custom_categories");
+    for (const { name, description } of DEFAULT_CATEGORIES) {
+      await db.run("INSERT INTO custom_categories (name, description) VALUES (?, ?)", [name, description]);
+    }
     res.json({ success: true });
   } catch (err) {
     if (err.status === 401) return res.status(401).json({ error: "Not authenticated" });
