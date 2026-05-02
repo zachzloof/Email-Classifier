@@ -12,6 +12,7 @@
       <div class="flex items-center gap-1">
         <router-link to="/" class="nav-link">Classifier</router-link>
         <router-link to="/inbox" class="nav-link">Inbox</router-link>
+        <router-link to="/settings" class="nav-link">Settings</router-link>
         <router-link to="/reset" class="nav-link">Reset</router-link>
       </div>
 

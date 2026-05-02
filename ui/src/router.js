@@ -3,12 +3,14 @@ import Classifier from "./pages/Classifier.vue";
 import Inbox from "./pages/Inbox.vue";
 import Reset from "./pages/Reset.vue";
 import Login from "./pages/Login.vue";
+import Settings from "./pages/Settings.vue";
 import { authState, checkAuth } from "./auth.js";
 
 const routes = [
   { path: "/login", component: Login, meta: { public: true } },
   { path: "/", component: Classifier },
   { path: "/inbox", component: Inbox },
+  { path: "/settings", component: Settings },
   { path: "/reset", component: Reset },
 ];
 

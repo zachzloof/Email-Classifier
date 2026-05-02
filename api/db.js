@@ -34,6 +34,15 @@ async function initUserSchema(db) {
     )
   `);
 
+  await db.exec(`
+    CREATE TABLE IF NOT EXISTS custom_categories (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL UNIQUE,
+      description TEXT NOT NULL,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+
   try { await db.exec("ALTER TABLE emails ADD COLUMN graph_id TEXT"); } catch (_) {}
   try { await db.exec("ALTER TABLE emails ADD COLUMN received_at TEXT"); } catch (_) {}
 

@@ -28,10 +28,7 @@
       <div class="flex flex-wrap items-center gap-2 mb-4">
         <select v-model="filterCategory" class="filter-select">
           <option value="">All categories</option>
-          <option value="Work">Work</option>
-          <option value="Personal">Personal</option>
-          <option value="HR">HR</option>
-          <option value="Spam">Spam</option>
+          <option v-for="cat in categoryNames" :key="cat" :value="cat">{{ cat }}</option>
         </select>
 
         <select v-model="filterPriority" class="filter-select">
@@ -300,6 +297,7 @@ import { ref, computed, watch, onMounted, onUnmounted } from 'vue';
 
 const emails = ref([]);
 const loading = ref(false);
+const categoryNames = ref([]);
 
 const filterCategory = ref('');
 const filterPriority = ref('');
@@ -531,8 +529,18 @@ async function sync(focused = false) {
   }
 }
 
+async function fetchCategories() {
+  try {
+    const res = await fetch('http://localhost:3001/categories');
+    if (res.ok) {
+      const data = await res.json();
+      categoryNames.value = data.map(c => c.name);
+    }
+  } catch (_) {}
+}
+
 function onKeydown(e) { if (e.key === 'Escape') closeEmail(); }
-onMounted(() => { fetchEmails(); window.addEventListener('keydown', onKeydown); });
+onMounted(() => { fetchEmails(); fetchCategories(); window.addEventListener('keydown', onKeydown); });
 onUnmounted(() => { window.removeEventListener('keydown', onKeydown); });
 </script>
 
