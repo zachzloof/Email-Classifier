@@ -2,59 +2,26 @@ import express from "express";
 import cors from "cors";
 import OpenAI from "openai";
 import { ConfidentialClientApplication, InteractionRequiredAuthError } from "@azure/msal-node";
-import { initDB } from "./db.js";
+import { getDbForUser, initTokensDB } from "./db.js";
 
 // --- DB ---
-const db = await initDB();
+const tokensDb = await initTokensDB();
 
-await db.exec(`
-  CREATE TABLE IF NOT EXISTS emails (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    graph_id TEXT,
-    subject TEXT,
-    body TEXT,
-    category TEXT,
-    priority TEXT,
-    summary TEXT,
-    suggested_action TEXT,
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-  )
-`);
-
-await db.exec(`
-  CREATE TABLE IF NOT EXISTS tokens (
-    id INTEGER PRIMARY KEY,
-    data TEXT
-  )
-`);
-
-await db.exec(`
-  CREATE TABLE IF NOT EXISTS deleted_graph_ids (
-    graph_id TEXT PRIMARY KEY,
-    deleted_at DATETIME DEFAULT CURRENT_TIMESTAMP
-  )
-`);
-
-// Add columns to existing DBs that predate them
-try { await db.exec("ALTER TABLE emails ADD COLUMN graph_id TEXT"); } catch (_) {}
-try { await db.exec("ALTER TABLE emails ADD COLUMN received_at TEXT"); } catch (_) {}
-
-// Unique partial index — allows multiple NULL graph_ids (legacy/sample rows) but
-// prevents duplicate real emails from being synced twice
-await db.exec(`
-  CREATE UNIQUE INDEX IF NOT EXISTS idx_emails_graph_id
-  ON emails(graph_id) WHERE graph_id IS NOT NULL
-`);
+async function getDb() {
+  const accounts = await msalClient.getTokenCache().getAllAccounts();
+  if (!accounts.length) throw Object.assign(new Error("NOT_AUTHENTICATED"), { status: 401 });
+  return getDbForUser(accounts[0].username);
+}
 
 // --- MSAL ---
 const cachePlugin = {
   beforeCacheAccess: async (ctx) => {
-    const row = await db.get("SELECT data FROM tokens WHERE id = 1");
+    const row = await tokensDb.get("SELECT data FROM tokens WHERE id = 1");
     if (row) ctx.tokenCache.deserialize(row.data);
   },
   afterCacheAccess: async (ctx) => {
     if (ctx.cacheHasChanged) {
-      await db.run("INSERT OR REPLACE INTO tokens (id, data) VALUES (1, ?)", [
+      await tokensDb.run("INSERT OR REPLACE INTO tokens (id, data) VALUES (1, ?)", [
         ctx.tokenCache.serialize(),
       ]);
     }
@@ -164,6 +131,7 @@ app.post("/auth/logout", async (req, res) => {
 // --- Sync ---
 app.post("/sync", async (req, res) => {
   try {
+    const db = await getDb();
     const focused = req.body?.focused === true;
     const fourWeeksAgo = new Date(Date.now() - 28 * 24 * 60 * 60 * 1000).toISOString();
     const filter = focused
@@ -293,12 +261,19 @@ app.post("/classify", async (req, res) => {
 });
 
 app.get("/emails", async (req, res) => {
-  const emails = await db.all("SELECT * FROM emails ORDER BY created_at DESC");
-  res.json(emails);
+  try {
+    const db = await getDb();
+    const emails = await db.all("SELECT * FROM emails ORDER BY created_at DESC");
+    res.json(emails);
+  } catch (err) {
+    if (err.status === 401) return res.status(401).json({ error: "Not authenticated" });
+    res.status(500).json({ error: err.message });
+  }
 });
 
 app.delete("/emails/:id", async (req, res) => {
   try {
+    const db = await getDb();
     const email = await db.get("SELECT graph_id FROM emails WHERE id = ?", [req.params.id]);
     if (!email) return res.status(404).json({ error: "Email not found" });
 
@@ -321,6 +296,7 @@ app.post("/emails/bulk-delete", async (req, res) => {
     return res.status(400).json({ error: "ids must be a non-empty array" });
   }
   try {
+    const db = await getDb();
     const placeholders = ids.map(() => "?").join(",");
     const rows = await db.all(`SELECT id, graph_id FROM emails WHERE id IN (${placeholders})`, ids);
 
@@ -348,9 +324,11 @@ app.post("/emails/bulk-delete", async (req, res) => {
 
 app.post("/reset", async (req, res) => {
   try {
+    const db = await getDb();
     await db.exec("DELETE FROM emails");
     res.json({ message: "Database cleared" });
   } catch (err) {
+    if (err.status === 401) return res.status(401).json({ error: "Not authenticated" });
     res.status(500).json({ error: "Failed to reset DB" });
   }
 });
