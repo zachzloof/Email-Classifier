@@ -115,6 +115,21 @@
         </div>
       </Transition>
 
+      <!-- Tools -->
+      <div class="grid grid-cols-2 gap-4 mt-2">
+        <router-link to="/" class="group flex flex-col gap-1.5 p-5 bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm hover:border-blue-300 dark:hover:border-blue-700 hover:shadow-md transition-all">
+          <span class="text-xl select-none">🧪</span>
+          <p class="font-semibold text-slate-900 dark:text-slate-100 text-sm">Try It</p>
+          <p class="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">Paste an email and see how the AI classifies it with your current categories.</p>
+        </router-link>
+
+        <router-link to="/reset" class="group flex flex-col gap-1.5 p-5 bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm hover:border-red-300 dark:hover:border-red-800 hover:shadow-md transition-all">
+          <span class="text-xl select-none">⚠️</span>
+          <p class="font-semibold text-slate-900 dark:text-slate-100 text-sm">Reset</p>
+          <p class="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">Reset your email database or restore default categories.</p>
+        </router-link>
+      </div>
+
     </div>
   </div>
 </template>
