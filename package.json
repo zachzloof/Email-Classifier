@@ -1,0 +1,60 @@
+{
+  "name": "mail-ai",
+  "version": "1.0.0",
+  "description": "AI-powered email classifier",
+  "main": "electron/main.js",
+  "type": "module",
+  "scripts": {
+    "dev:api": "node api/index.js",
+    "dev:ui": "npm run dev --prefix=ui",
+    "dev": "concurrently --names \"api,ui\" --prefix-colors \"blue,green\" \"npm run dev:api\" \"npm run dev:ui\"",
+    "build:ui": "npm run build --prefix=ui",
+    "build": "npm run build:ui && electron-builder --win",
+    "start": "electron .",
+    "postinstall": "electron-builder install-app-deps"
+  },
+  "dependencies": {
+    "@azure/msal-node": "^5.1.5",
+    "cors": "^2.8.6",
+    "express": "^5.2.1",
+    "openai": "^6.35.0",
+    "sqlite": "^5.1.1",
+    "sqlite3": "^6.0.1"
+  },
+  "devDependencies": {
+    "concurrently": "^9.0.0",
+    "electron": "^41.0.0",
+    "electron-builder": "^26.0.0"
+  },
+  "build": {
+    "appId": "com.mailai.app",
+    "productName": "MailAI",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "electron/**/*",
+      "api/**/*",
+      "ui/dist/**/*",
+      "!api/data",
+      "!api/data/**/*",
+      "!api/tokens.db",
+      "!api/node_modules/**/*",
+      "!ui/src/**/*",
+      "!ui/node_modules/**/*"
+    ],
+    "asarUnpack": [
+      "node_modules/sqlite3/**/*"
+    ],
+    "win": {
+      "target": "nsis",
+      "icon": "ui/public/favicon.ico"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true
+    }
+  }
+}

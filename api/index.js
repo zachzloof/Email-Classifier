@@ -3,6 +3,10 @@ import cors from "cors";
 import OpenAI from "openai";
 import { PublicClientApplication, CryptoProvider, InteractionRequiredAuthError } from "@azure/msal-node";
 import { getDbForUser, initTokensDB } from "./db.js";
+import path from "path";
+import { fileURLToPath } from "url";
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 // --- DB ---
 const tokensDb = await initTokensDB();
@@ -47,7 +51,7 @@ const SCOPES = [
 ];
 
 const REDIRECT_URI = "http://localhost:3001/auth/callback";
-const FRONTEND_URL = "http://localhost:5173";
+const FRONTEND_URL = process.env.FRONTEND_URL ?? "http://localhost:5173";
 
 // --- Express ---
 const app = express();
@@ -472,4 +476,23 @@ app.post("/config/openai-key", async (req, res) => {
   res.json({ success: true });
 });
 
-app.listen(3001, () => console.log("Server running on http://localhost:3001"));
+// Serve the built Vue app in Electron / production mode
+if (process.env.SERVE_STATIC === 'true') {
+  const distPath = path.join(__dirname, '..', 'ui', 'dist');
+  app.use(express.static(distPath));
+  app.get(/.*/, (_req, res) => res.sendFile(path.join(distPath, 'index.html')));
+}
+
+export function startServer(port = 3001) {
+  return new Promise((resolve) => {
+    app.listen(port, () => {
+      console.log(`Server running on http://localhost:${port}`);
+      resolve();
+    });
+  });
+}
+
+// Auto-start when run directly (development)
+if (!process.env.ELECTRON_RUN) {
+  await startServer();
+}

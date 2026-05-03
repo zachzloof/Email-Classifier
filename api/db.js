@@ -3,7 +3,9 @@ import { open } from "sqlite";
 import path from "path";
 import fs from "fs";
 
-const DATA_DIR = "./data";
+const DATA_DIR = process.env.USER_DATA_PATH
+  ? path.join(process.env.USER_DATA_PATH, 'data')
+  : path.resolve('./data');
 fs.mkdirSync(DATA_DIR, { recursive: true });
 
 const dbCache = new Map();
@@ -75,7 +77,10 @@ export async function getDbForUser(email) {
 }
 
 export async function initTokensDB() {
-  const db = await open({ filename: "./tokens.db", driver: sqlite3.Database });
+  const tokensPath = process.env.USER_DATA_PATH
+    ? path.join(process.env.USER_DATA_PATH, 'tokens.db')
+    : path.resolve('./tokens.db');
+  const db = await open({ filename: tokensPath, driver: sqlite3.Database });
   await db.exec(`
     CREATE TABLE IF NOT EXISTS tokens (
       id INTEGER PRIMARY KEY,
