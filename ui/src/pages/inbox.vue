@@ -188,11 +188,49 @@
         <div class="absolute inset-0 bg-slate-950/60 backdrop-blur-sm" @click="showSyncModal = false" />
         <div class="modal-card relative bg-white dark:bg-slate-900 rounded-2xl shadow-2xl w-full max-w-sm border border-slate-200 dark:border-slate-700 p-6">
           <h2 class="text-base font-semibold text-slate-900 dark:text-slate-100 mb-1">Sync Emails</h2>
-          <p class="text-sm text-slate-500 dark:text-slate-400 mb-5">Which emails would you like to sync?</p>
+          <p class="text-sm text-slate-500 dark:text-slate-400 mb-5">Configure your sync settings.</p>
+
+          <div class="space-y-4 mb-5">
+            <!-- Time range -->
+            <div>
+              <label class="block text-xs font-semibold text-slate-500 dark:text-slate-400 mb-2">How far back</label>
+              <div class="flex items-center gap-2">
+                <div class="flex gap-1">
+                  <button v-for="d in [7, 14, 28, 56]" :key="d" @click="syncDays = d"
+                    class="px-2.5 py-1 rounded-lg text-xs font-medium transition-colors"
+                    :class="syncDays === d ? 'bg-blue-600 text-white' : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700'"
+                  >{{ d }}d</button>
+                </div>
+                <div class="flex items-center gap-1.5 ml-auto">
+                  <input type="number" v-model.number="syncDays" min="1" max="365"
+                    class="w-16 px-2 py-1 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 text-xs text-center focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                  <span class="text-xs text-slate-400">days</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- Batch size -->
+            <div>
+              <label class="block text-xs font-semibold text-slate-500 dark:text-slate-400 mb-2">Emails per sync <span class="font-normal">(max 100)</span></label>
+              <div class="flex items-center gap-2">
+                <div class="flex gap-1">
+                  <button v-for="l in [25, 50, 100]" :key="l" @click="syncLimit = l"
+                    class="px-2.5 py-1 rounded-lg text-xs font-medium transition-colors"
+                    :class="syncLimit === l ? 'bg-blue-600 text-white' : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700'"
+                  >{{ l }}</button>
+                </div>
+                <input type="number" v-model.number="syncLimit" min="1" max="100"
+                  class="ml-auto w-16 px-2 py-1 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 text-xs text-center focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+            </div>
+          </div>
+
           <div class="space-y-2">
             <button @click="startSync(false)" class="w-full px-4 py-3 rounded-xl border border-slate-200 dark:border-slate-700 hover:border-blue-400 dark:hover:border-blue-600 hover:bg-blue-50 dark:hover:bg-blue-950/30 transition-colors text-left">
               <p class="text-sm font-semibold text-slate-900 dark:text-slate-100">All Inbox</p>
-              <p class="text-xs text-slate-500 dark:text-slate-400 mt-0.5">Sync all emails from the past 4 weeks</p>
+              <p class="text-xs text-slate-500 dark:text-slate-400 mt-0.5">Sync all emails in the selected time range</p>
             </button>
             <button @click="startSync(true)" class="w-full px-4 py-3 rounded-xl border border-slate-200 dark:border-slate-700 hover:border-blue-400 dark:hover:border-blue-600 hover:bg-blue-50 dark:hover:bg-blue-950/30 transition-colors text-left">
               <p class="text-sm font-semibold text-slate-900 dark:text-slate-100">Focused only</p>
@@ -330,6 +368,8 @@ const replyError = ref('');
 const syncing = ref(false);
 const syncMessage = ref(null);
 const showSyncModal = ref(false);
+const syncDays = ref(28);
+const syncLimit = ref(100);
 const deleteError = ref('');
 
 const filteredEmails = computed(() => {
@@ -511,14 +551,17 @@ async function sync(focused = false) {
     const res = await fetch('http://localhost:3001/sync', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ focused }),
+      body: JSON.stringify({ focused, days: syncDays.value, limit: syncLimit.value }),
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'Sync failed');
     const label = focused ? 'focused ' : '';
+    const hint = data.added === data.limit ? ' — sync again for more' : '';
     syncMessage.value = {
       type: 'success',
-      text: data.added > 0 ? `+${data.added} new ${label}email${data.added !== 1 ? 's' : ''}` : 'Already up to date',
+      text: data.added > 0
+        ? `+${data.added} new ${label}email${data.added !== 1 ? 's' : ''}${hint}`
+        : 'Already up to date',
     };
     if (data.added > 0) await fetchEmails();
   } catch (err) {

@@ -133,47 +133,55 @@ app.post("/sync", async (req, res) => {
   try {
     const db = await getDb();
     const focused = req.body?.focused === true;
-    const fourWeeksAgo = new Date(Date.now() - 28 * 24 * 60 * 60 * 1000).toISOString();
-    const filter = focused
-      ? `receivedDateTime ge ${fourWeeksAgo} and inferenceClassification eq 'focused'`
-      : `receivedDateTime ge ${fourWeeksAgo}`;
-    const data = await graphFetch(
-      "GET",
-      `/me/mailFolders/inbox/messages?$select=id,subject,body,from,receivedDateTime&$top=200&$orderby=receivedDateTime desc&$filter=${encodeURIComponent(filter)}`,
-      null,
-      { Prefer: 'outlook.body-content-type="text"' }
-    );
+    const days = Math.min(365, Math.max(1, parseInt(req.body?.days) || 28));
+    const limit = Math.min(100, Math.max(1, parseInt(req.body?.limit) || 100));
 
-    // Expire tombstones older than 4 weeks (matches the sync window)
-    await db.run(`DELETE FROM deleted_graph_ids WHERE deleted_at < datetime('now', '-28 days')`);
+    const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
+    const filter = focused
+      ? `receivedDateTime ge ${since} and inferenceClassification eq 'focused'`
+      : `receivedDateTime ge ${since}`;
+
+    await db.run(`DELETE FROM deleted_graph_ids WHERE deleted_at < datetime('now', '-${days} days')`);
 
     const categoryRows = await db.all("SELECT name, description FROM custom_categories ORDER BY id ASC");
     const categories = categoryRows.length ? categoryRows : DEFAULT_CATEGORIES;
 
     let added = 0;
-    for (const msg of data.value) {
-      const existing = await db.get("SELECT id FROM emails WHERE graph_id = ?", [msg.id]);
-      if (existing) continue;
-      const tombstoned = await db.get("SELECT 1 FROM deleted_graph_ids WHERE graph_id = ?", [msg.id]);
-      if (tombstoned) continue;
+    let nextPath = `/me/mailFolders/inbox/messages?$select=id,subject,body,from,receivedDateTime&$top=100&$orderby=receivedDateTime desc&$filter=${encodeURIComponent(filter)}`;
 
-      const bodyText =
-        msg.body?.contentType === "html"
-          ? stripHtml(msg.body.content)
-          : msg.body?.content ?? "";
+    while (nextPath && added < limit) {
+      const data = await graphFetch("GET", nextPath, null, { Prefer: 'outlook.body-content-type="text"' });
 
-      const raw = await classifyEmail({ subject: msg.subject, body: bodyText }, categories);
-      const result = JSON.parse(raw);
+      for (const msg of data.value) {
+        if (added >= limit) break;
 
-      await db.run(
-        `INSERT OR IGNORE INTO emails (graph_id, subject, body, category, priority, summary, suggested_action, received_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-        [msg.id, msg.subject, bodyText, result.category, result.priority, result.summary, result.suggested_action, msg.receivedDateTime ?? null]
-      );
-      added++;
+        const existing = await db.get("SELECT id FROM emails WHERE graph_id = ?", [msg.id]);
+        if (existing) continue;
+        const tombstoned = await db.get("SELECT 1 FROM deleted_graph_ids WHERE graph_id = ?", [msg.id]);
+        if (tombstoned) continue;
+
+        const bodyText =
+          msg.body?.contentType === "html"
+            ? stripHtml(msg.body.content)
+            : msg.body?.content ?? "";
+
+        const raw = await classifyEmail({ subject: msg.subject, body: bodyText }, categories);
+        const result = JSON.parse(raw);
+
+        await db.run(
+          `INSERT OR IGNORE INTO emails (graph_id, subject, body, category, priority, summary, suggested_action, received_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+          [msg.id, msg.subject, bodyText, result.category, result.priority, result.summary, result.suggested_action, msg.receivedDateTime ?? null]
+        );
+        added++;
+      }
+
+      nextPath = added < limit && data["@odata.nextLink"]
+        ? data["@odata.nextLink"].replace("https://graph.microsoft.com/v1.0", "")
+        : null;
     }
 
-    res.json({ added, total: data.value.length });
+    res.json({ added, limit });
   } catch (err) {
     if (err.status === 401) return res.status(401).json({ error: "Not authenticated" });
     res.status(500).json({ error: err.message });
