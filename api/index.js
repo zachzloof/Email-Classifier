@@ -1,7 +1,7 @@
 import express from "express";
 import cors from "cors";
 import OpenAI from "openai";
-import { ConfidentialClientApplication, InteractionRequiredAuthError } from "@azure/msal-node";
+import { PublicClientApplication, CryptoProvider, InteractionRequiredAuthError } from "@azure/msal-node";
 import { getDbForUser, initTokensDB } from "./db.js";
 
 // --- DB ---
@@ -28,14 +28,16 @@ const cachePlugin = {
   },
 };
 
-const msalClient = new ConfidentialClientApplication({
+const msalClient = new PublicClientApplication({
   auth: {
-    clientId: process.env.MS_CLIENT_ID,
+    clientId: "76939459-96bb-45d2-a95a-aa8cb61571d9",
     authority: "https://login.microsoftonline.com/consumers",
-    clientSecret: process.env.MS_CLIENT_SECRET,
   },
   cache: { cachePlugin },
 });
+
+const cryptoProvider = new CryptoProvider();
+const pkceStore = new Map(); // state → codeVerifier
 
 const SCOPES = [
   "https://graph.microsoft.com/Mail.ReadWrite",
@@ -53,7 +55,12 @@ app.use(cors());
 app.use(express.json());
 
 // --- OpenAI ---
-const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+async function getOpenAIClient() {
+  const row = await tokensDb.get("SELECT value FROM config WHERE key = 'openai_api_key'");
+  const apiKey = row?.value || process.env.OPENAI_API_KEY;
+  if (!apiKey) throw Object.assign(new Error("OpenAI API key not configured. Add it in Settings."), { status: 400 });
+  return new OpenAI({ apiKey });
+}
 
 // --- Helpers ---
 async function getAccessToken() {
@@ -94,16 +101,30 @@ function stripHtml(html) {
 
 // --- Auth ---
 app.get("/auth/login", async (req, res) => {
-  const url = await msalClient.getAuthCodeUrl({ scopes: SCOPES, redirectUri: REDIRECT_URI, prompt: "select_account" });
+  const { verifier, challenge } = await cryptoProvider.generatePkceCodes();
+  const state = cryptoProvider.createNewGuid();
+  pkceStore.set(state, verifier);
+  const url = await msalClient.getAuthCodeUrl({
+    scopes: SCOPES,
+    redirectUri: REDIRECT_URI,
+    prompt: "select_account",
+    codeChallenge: challenge,
+    codeChallengeMethod: "S256",
+    state,
+  });
   res.redirect(url);
 });
 
 app.get("/auth/callback", async (req, res) => {
+  const { code, state } = req.query;
+  const verifier = pkceStore.get(state);
+  pkceStore.delete(state);
   try {
     await msalClient.acquireTokenByCode({
-      code: req.query.code,
+      code,
       scopes: SCOPES,
       redirectUri: REDIRECT_URI,
+      codeVerifier: verifier,
     });
     res.redirect(FRONTEND_URL);
   } catch (err) {
@@ -218,10 +239,11 @@ const DEFAULT_CATEGORIES = [
 ];
 
 async function classifyEmail(email, categories = []) {
+  const openai = await getOpenAIClient();
   const categoryEnum = categories.map((c) => c.name);
   const categoryDescriptions = categories.map((c) => `  - ${c.name}: ${c.description}`).join("\n");
 
-  const response = await client.responses.create({
+  const response = await openai.responses.create({
     model: "gpt-4.1-mini",
     temperature: 0.2,
     instructions: `
@@ -432,6 +454,22 @@ app.post("/reset", async (req, res) => {
     if (err.status === 401) return res.status(401).json({ error: "Not authenticated" });
     res.status(500).json({ error: "Failed to reset DB" });
   }
+});
+
+// --- Config ---
+app.get("/config/openai-key", async (req, res) => {
+  const row = await tokensDb.get("SELECT value FROM config WHERE key = 'openai_api_key'");
+  res.json({ configured: !!(row?.value || process.env.OPENAI_API_KEY) });
+});
+
+app.post("/config/openai-key", async (req, res) => {
+  const key = req.body.key?.trim();
+  if (!key) return res.status(400).json({ error: "API key is required" });
+  await tokensDb.run(
+    "INSERT OR REPLACE INTO config (key, value) VALUES ('openai_api_key', ?)",
+    [key]
+  );
+  res.json({ success: true });
 });
 
 app.listen(3001, () => console.log("Server running on http://localhost:3001"));

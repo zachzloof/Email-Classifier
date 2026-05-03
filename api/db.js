@@ -82,5 +82,11 @@ export async function initTokensDB() {
       data TEXT
     )
   `);
+  await db.exec(`
+    CREATE TABLE IF NOT EXISTS config (
+      key TEXT PRIMARY KEY,
+      value TEXT
+    )
+  `);
   return db;
 }

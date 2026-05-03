@@ -54,6 +54,36 @@
         </div>
       </div>
 
+      <!-- OpenAI API Key -->
+      <div class="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm p-6 mb-6">
+        <div class="flex items-center justify-between mb-4">
+          <div>
+            <h2 class="text-lg font-semibold text-slate-900 dark:text-slate-100">OpenAI API Key</h2>
+            <p class="text-sm text-slate-500 dark:text-slate-400 mt-0.5">Required for email classification</p>
+          </div>
+          <span v-if="openaiConfigured" class="text-xs font-semibold text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/40 px-2.5 py-1 rounded-full">Configured</span>
+          <span v-else class="text-xs font-semibold text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-950/40 px-2.5 py-1 rounded-full">Not set</span>
+        </div>
+        <div class="flex gap-2">
+          <input
+            v-model="openaiKeyInput"
+            type="password"
+            placeholder="sk-..."
+            class="flex-1 px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+          />
+          <button
+            @click="saveOpenAIKey"
+            :disabled="!openaiKeyInput.trim() || savingKey"
+            class="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-slate-300 dark:disabled:bg-slate-700 text-white rounded-lg font-medium text-sm transition-colors"
+          >
+            {{ savingKey ? 'Saving...' : 'Save' }}
+          </button>
+        </div>
+        <p v-if="keyMessage" class="mt-2 text-xs" :class="keyMessage.type === 'error' ? 'text-red-500 dark:text-red-400' : 'text-emerald-600 dark:text-emerald-400'">
+          {{ keyMessage.text }}
+        </p>
+      </div>
+
       <!-- Add/Edit Form Modal -->
       <Transition name="fade">
         <div v-if="showAddForm || editingCategory" class="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
@@ -136,6 +166,40 @@
 
 <script setup>
 import { ref, onMounted } from 'vue';
+
+const openaiConfigured = ref(false);
+const openaiKeyInput = ref('');
+const savingKey = ref(false);
+const keyMessage = ref(null);
+
+async function loadOpenAIStatus() {
+  try {
+    const res = await fetch('http://localhost:3001/config/openai-key');
+    if (res.ok) openaiConfigured.value = (await res.json()).configured;
+  } catch (_) {}
+}
+
+async function saveOpenAIKey() {
+  savingKey.value = true;
+  keyMessage.value = null;
+  try {
+    const res = await fetch('http://localhost:3001/config/openai-key', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ key: openaiKeyInput.value }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error);
+    openaiConfigured.value = true;
+    openaiKeyInput.value = '';
+    keyMessage.value = { type: 'success', text: 'API key saved.' };
+    setTimeout(() => keyMessage.value = null, 3000);
+  } catch (err) {
+    keyMessage.value = { type: 'error', text: err.message };
+  } finally {
+    savingKey.value = false;
+  }
+}
 
 const categories = ref([]);
 const showAddForm = ref(false);
@@ -224,6 +288,7 @@ async function deleteCategory(category) {
 }
 
 onMounted(() => {
+  loadOpenAIStatus();
   loadCategories();
 });
 </script>
